@@ -1,0 +1,11 @@
+{% extends 'base.html' %}
+{% block title %}Dashboard - Human Eye Disease Prediction System{% endblock %}
+{% block content %}
+<section class="auth-section">
+  <div class="auth-card">
+    <h2>Welcome, {{ user_name }}</h2>
+    <p class="small-text">You are successfully logged in.</p>
+    <p><a href="{{ url_for('logout') }}" class="btn btn-outline btn-block">Logout</a></p>
+  </div>
+</section>
+{% endblock %}

@@ -1,0 +1,82 @@
+{% extends 'base.html' %}
+
+{% block title %}About Us - Human Eye Disease Prediction System{% endblock %}
+
+{% block content %}
+<section class="features" id="about">
+  <div class="container">
+    <div class="section-intro">
+      <p class="eyebrow">About EyePredict</p>
+      <h2>About EyePredict</h2>
+      <p class="lead">EyePredict combines best-in-class artificial intelligence with an intuitive platform to make eye disease detection fast, reliable, and accessible for patients and healthcare professionals.</p>
+    </div>
+
+    <div class="grid features-grid" style="margin-top: 2.5rem;">
+      <article class="feature-card">
+        <div class="feature-icon">🎯</div>
+        <h3>AI-Based Diagnosis</h3>
+        <p>Precision-driven algorithms analyze ocular images to identify disease markers early, empowering clinicians with actionable insights.</p>
+      </article>
+      <article class="feature-card">
+        <div class="feature-icon">⚡</div>
+        <h3>Real-Time Analysis</h3>
+        <p>Rapid processing delivers results quickly while maintaining the highest standards of clinical accuracy and consistency.</p>
+      </article>
+      <article class="feature-card">
+        <div class="feature-icon">🔒</div>
+        <h3>Secure Data</h3>
+        <p>Patient data is handled with enterprise-grade protection, ensuring privacy and compliance across every interaction.</p>
+      </article>
+    </div>
+
+    <section class="page-section" style="margin-top: 4rem; background: rgba(255,255,255,0.72); border-radius: 26px; padding: 2.5rem 1.5rem;">
+      <div class="grid features-grid">
+        <article class="feature-card">
+          <h3>Mission</h3>
+          <p>To advance early detection of eye disease through intelligent diagnostics and to enable better healthcare outcomes for every patient.</p>
+        </article>
+        <article class="feature-card">
+          <h3>Vision</h3>
+          <p>To build an AI-driven future for medical diagnostics where quality care is more proactive, precise, and accessible worldwide.</p>
+        </article>
+      </div>
+    </section>
+
+    <section class="page-section" style="margin-top: 4rem;">
+      <div class="section-intro">
+        <p class="eyebrow">Why Choose Us</p>
+        <h2>Why healthcare teams trust EyePredict</h2>
+      </div>
+      <div class="grid features-grid" style="margin-top: 2rem; gap: 1.5rem;">
+        <article class="feature-card">
+          <div class="feature-icon">✅</div>
+          <h3>High Accuracy</h3>
+          <p>Advanced models reduce false positives and help clinicians make confident decisions.</p>
+        </article>
+        <article class="feature-card">
+          <div class="feature-icon">👌</div>
+          <h3>Easy to Use</h3>
+          <p>Streamlined workflows and intuitive interfaces make adoption simple for every team.</p>
+        </article>
+        <article class="feature-card">
+          <div class="feature-icon">⏱️</div>
+          <h3>Fast Processing</h3>
+          <p>Efficient analysis delivers rapid results so care can move forward without delay.</p>
+        </article>
+        <article class="feature-card">
+          <div class="feature-icon">🔐</div>
+          <h3>Secure & Reliable</h3>
+          <p>Robust infrastructure keeps data protected while ensuring consistent performance.</p>
+        </article>
+      </div>
+    </section>
+
+    <section class="page-section" style="margin-top: 4rem; padding: 3rem 2rem; background: rgba(245,246,255,0.85); border-radius: 28px; text-align: center;">
+      <p class="eyebrow">Get started</p>
+      <h2>Start Your Eye Analysis Today</h2>
+      <p class="lead" style="max-width: 620px; margin: 0.75rem auto 1.8rem;">Experience a smarter path to eye care with fast, AI-powered imaging and analysis designed to support both clinicians and patients.</p>
+      <a href="{{ url_for('register') }}" class="btn btn-primary">Start Prediction</a>
+    </section>
+  </div>
+</section>
+{% endblock %}

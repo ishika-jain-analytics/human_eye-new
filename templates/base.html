@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>{% block title %}Eye Disease Prediction System{% endblock %}</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}" />
+  </head>
+  <body>
+    <header class="navbar">
+      <div class="container nav-inner">
+        <a href="{{ url_for('home') }}" class="brand">
+          <img src="{{ url_for('static', filename='logo.png') }}" alt="EyePredict logo" class="brand-logo" />
+          <span>EyePredict</span>
+        </a>
+        <nav class="nav-links">
+          <a href="{{ url_for('home') }}" class="{% if request.path == url_for('home') %}active{% endif %}">Home</a>
+          <a href="{{ url_for('about') }}" class="{% if request.path == url_for('about') %}active{% endif %}">About</a>
+          <a href="{{ url_for('contact') }}" class="{% if request.path == url_for('contact') %}active{% endif %}">Contact</a>
+          {% if session.get('user_id') %}
+            <a href="{{ url_for('prediction') }}" class="{% if request.path == url_for('prediction') %}active{% endif %}">Prediction</a>
+          {% endif %}
+        </nav>
+        <div class="nav-actions">
+          {% if session.get('user_id') %}
+            <a href="{{ url_for('logout') }}" class="nav-button nav-button-outline">Logout</a>
+          {% else %}
+            <a href="{{ url_for('login') }}" class="nav-button nav-button-outline">Login</a>
+            <a href="{{ url_for('register') }}" class="nav-button nav-button-primary">Register</a>
+          {% endif %}
+        </div>
+      </div>
+    </header>
+
+    <main class="page-container">{% block content %}{% endblock %}</main>
+
+    <footer class="footer">
+      <div class="container footer-inner">
+        <p class="footer-copy">&copy; {{ config.get('PROJECT_NAME', 'Eye Disease Prediction System') }} {{ current_year if current_year else '2026' }}.</p>
+        <div class="footer-links">
+          <a href="#">Privacy Policy</a>
+          <span class="footer-separator">|</span>
+          <a href="#">Terms</a>
+          <span class="footer-separator">|</span>
+          <a href="{{ url_for('contact') }}">Contact</a>
+        </div>
+      </div>
+    </footer>
+  </body>
+</html>

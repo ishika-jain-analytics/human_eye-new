@@ -1,0 +1,47 @@
+{% extends 'base.html' %}
+{% block title %}Login - Human Eye Disease Prediction System{% endblock %}
+{% block content %}
+<section class="auth-section">
+  <div class="auth-card">
+    <h2>Login to Your Account</h2>
+    {% with messages = get_flashed_messages(with_categories=true) %}
+      {% if messages %}
+        <ul class="flash-list">
+          {% for category, msg in messages %}
+            <li class="flash {{ category }}">{{ msg }}</li>
+          {% endfor %}
+        </ul>
+      {% endif %}
+    {% endwith %}
+    <a href="{{ url_for('login_google') }}" class="google-btn">
+      <span class="google-icon">
+        <svg width="20" height="20" viewBox="0 0 533.5 544.3" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+          <path fill="#4285f4" d="M533.5 278.4c0-18.8-1.7-37-5-54.6H272v103.4h146.9c-6.4 34.4-25.5 63.6-54.6 83.1v68h88.3c51.7-47.7 81.9-118 81.9-199.9z"/>
+          <path fill="#34a853" d="M272 544.3c73.5 0 135.3-24.4 180.5-66.1l-88.3-68c-24.5 16.5-55.8 26.3-92.1 26.3-70.8 0-130.9-47.8-152.2-112.4H30.1v70.7c45.2 89.8 137.9 149.5 241.9 149.5z"/>
+          <path fill="#fbbc04" d="M119.8 322.1c-10.6-31.5-10.6-65.7 0-97.2V154.2H30.1c-38.9 76.6-38.9 167.1 0 243.7l89.7-76.8z"/>
+          <path fill="#ea4335" d="M272 107.7c38.8 0 73.6 13.4 101.1 39.5l75.8-75.8C407.3 24.4 345.5 0 272 0 168 0 75.3 59.7 30.1 149.5l89.7 76.8C141.1 155.5 201.2 107.7 272 107.7z"/>
+        </svg>
+      </span>
+      Continue with Google
+    </a>
+    <div class="divider-split">
+      <span>OR</span>
+    </div>
+    <form method="post" action="/login" novalidate autocomplete="off">
+      <div class="form-group">
+        <label for="email">Email</label>
+        <input type="email" id="email" name="email" placeholder="you@example.com" required autocomplete="username" />
+      </div>
+      <div class="form-group">
+        <label for="password">Password</label>
+        <input type="password" id="password" name="password" placeholder="Enter your password" required autocomplete="current-password" />
+      </div>
+      <div class="auth-actions-row">
+        <a href="{{ url_for('forgot_password') }}" class="forgot-password">Forgot Password?</a>
+        <button type="submit" class="btn btn-primary btn-block">Login</button>
+      </div>
+      <p class="small-text">Don't have an account? <a href="{{ url_for('register') }}">Register</a></p>
+    </form>
+  </div>
+</section>
+{% endblock %}

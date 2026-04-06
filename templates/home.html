@@ -1,0 +1,55 @@
+{% extends 'base.html' %}
+
+{% block title %}Home - Eye Disease Prediction System{% endblock %}
+
+{% block content %}
+<section class="hero" id="home">
+  <div class="container hero-inner">
+    <div class="hero-left">
+      <p class="eyebrow">Premium AI Vision Screening</p>
+      <h1>Detect <span class="gradient-text">Eye Diseases</span> early with <span class="gradient-text">AI-powered</span> precision.</h1>
+      <p class="subtitle">Upload eye images and receive direct, intelligent predictions that make vision care faster, clearer, and more reliable.</p>
+      <div class="hero-cta">
+        <a href="{{ url_for('register') }}" class="btn btn-primary btn-cta">Start Prediction</a>
+      </div>
+      <div class="hero-features">
+        <span>AI-powered screening</span>
+        <span>Rapid results</span>
+        <span>Trusted security</span>
+      </div>
+    </div>
+    <div class="hero-right">
+      <div class="hero-image-card">
+        <div class="hero-image-glow"></div>
+        <img src="{{ url_for('static', filename='images/image.jpg') }}" alt="Eye healthcare" />
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="feature-section">
+  <div class="container">
+    <div class="section-intro">
+      <p class="eyebrow">Core Benefits</p>
+      <h2>Built for smarter insight, secure uploads, and confident care.</h2>
+    </div>
+    <div class="features-grid">
+      <article class="feature-card">
+        <div class="feature-icon">⚡</div>
+        <h3>Fast AI Detection</h3>
+        <p>Get immediate, automated analysis that turns every image into a reliable clinical insight.</p>
+      </article>
+      <article class="feature-card">
+        <div class="feature-icon">🔒</div>
+        <h3>Secure Upload</h3>
+        <p>Protected file transfers and privacy-first handling keep patient data safe every step of the way.</p>
+      </article>
+      <article class="feature-card">
+        <div class="feature-icon">✔️</div>
+        <h3>Accurate Results</h3>
+        <p>High-quality predictions with confidence that supports your next clinical decision.</p>
+      </article>
+    </div>
+  </div>
+</section>
+{% endblock %}

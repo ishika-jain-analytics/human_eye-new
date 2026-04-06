@@ -1,0 +1,87 @@
+{% extends 'base.html' %}
+
+{% block title %}Prediction - Eye Disease Prediction System{% endblock %}
+
+{% block content %}
+<section class="prediction-page">
+  <div class="container">
+    <div class="section-header">
+      <p class="eyebrow">Prediction Hub</p>
+      <h1>Eye Disease Prediction</h1>
+      <p class="subtitle">Upload a clear retinal or eye image to receive a fast prediction with confidence and severity insight.</p>
+    </div>
+
+    <div class="prediction-grid">
+      <div class="prediction-card upload-card">
+        <div class="card-header">
+          <h2>Upload Eye Image</h2>
+        </div>
+        <div id="dropzone" class="upload-dropzone">
+          <div>
+            <span class="drop-icon">📤</span>
+            <p class="drop-title">Drag & drop an image here</p>
+            <p class="drop-text">or choose from your device.</p>
+          </div>
+        </div>
+        <input type="file" id="eyeImage" accept=".jpg,.jpeg,.png" hidden />
+        <div class="upload-actions">
+          <button type="button" id="chooseImageBtn" class="btn btn-primary">Choose Image</button>
+          <button type="button" id="resetBtn" class="secondary-button">Reset Image</button>
+        </div>
+        <div class="preview-panel">
+          <img id="previewImage" src="" alt="Uploaded preview" class="preview-image hidden" />
+          <div id="previewPlaceholder" class="preview-placeholder">
+            <span>Image preview will appear here</span>
+          </div>
+        </div>
+        <p class="helper-text">Upload a clear retinal or eye image for accurate prediction.</p>
+        <p class="supported-text">Supported formats: JPG, PNG, JPEG</p>
+        <button type="button" id="predictBtn" class="btn btn-primary btn-block" disabled>Predict Disease</button>
+      </div>
+
+      <div class="prediction-card result-card">
+        <div class="card-header">
+          <h2>Prediction Result</h2>
+        </div>
+        <div class="result-state" id="resultState">
+          <div class="result-empty" id="emptyState">
+            <p>Upload an image to start prediction.</p>
+          </div>
+          <div class="result-loading hidden" id="loadingState">
+            <div class="spinner"></div>
+            <p>Analyzing image, please wait...</p>
+          </div>
+          <div class="result-summary hidden" id="resultSummary">
+            <div class="result-row">
+              <span>Disease</span>
+              <strong id="diseaseName">-</strong>
+            </div>
+            <div class="result-row">
+              <span>Confidence Score</span>
+              <strong id="confidenceScore">-</strong>
+            </div>
+            <div class="progress-track">
+              <div class="progress-bar-label">Confidence level</div>
+              <div class="progress-bar"><div class="progress-fill" id="confidenceBar"></div></div>
+            </div>
+            <div class="result-row">
+              <span>Severity Level</span>
+              <span id="severityBadge" class="severity-badge badge-normal">Normal</span>
+            </div>
+            <div class="result-description">
+              <h3>About this diagnosis</h3>
+              <p id="diseaseDescription">-</p>
+            </div>
+            <div class="result-meta">
+              <span><strong>Date:</strong> <span id="predictionDate">-</span></span>
+            </div>
+            <button type="button" id="downloadReportBtn" class="btn btn-primary btn-block" disabled>Download PDF Report</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<script src="{{ url_for('static', filename='js/script.js') }}" defer></script>
+{% endblock %}
