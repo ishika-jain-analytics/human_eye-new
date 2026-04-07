@@ -21,7 +21,7 @@
           <a href="{{ url_for('about') }}" class="{% if request.path == url_for('about') %}active{% endif %}">About</a>
           <a href="{{ url_for('contact') }}" class="{% if request.path == url_for('contact') %}active{% endif %}">Contact</a>
           {% if session.get('user_id') %}
-            <a href="{{ url_for('prediction') }}" class="{% if request.path == url_for('prediction') %}active{% endif %}">Prediction</a>
+            <a href="{{ url_for('predict') }}" class="{% if request.path == url_for('predict') %}active{% endif %}">Prediction</a>
           {% endif %}
         </nav>
         <div class="nav-actions">

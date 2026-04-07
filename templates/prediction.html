@@ -12,7 +12,8 @@
     </div>
 
     <div class="prediction-grid">
-      <div class="prediction-card upload-card">
+      <form action="/predict" method="POST" enctype="multipart/form-data">
+        <div class="prediction-card upload-card">
         <div class="card-header">
           <h2>Upload Eye Image</h2>
         </div>
@@ -23,7 +24,7 @@
             <p class="drop-text">or choose from your device.</p>
           </div>
         </div>
-        <input type="file" id="eyeImage" accept=".jpg,.jpeg,.png" hidden />
+        <input type="file" id="eyeImage" name="image" accept=".jpg,.jpeg,.png" hidden />
         <div class="upload-actions">
           <button type="button" id="chooseImageBtn" class="btn btn-primary">Choose Image</button>
           <button type="button" id="resetBtn" class="secondary-button">Reset Image</button>
@@ -36,9 +37,9 @@
         </div>
         <p class="helper-text">Upload a clear retinal or eye image for accurate prediction.</p>
         <p class="supported-text">Supported formats: JPG, PNG, JPEG</p>
-        <button type="button" id="predictBtn" class="btn btn-primary btn-block" disabled>Predict Disease</button>
+        <button type="submit" id="predictBtn" class="btn btn-primary btn-block" >Predict Disease</button>
       </div>
-
+      </form>
       <div class="prediction-card result-card">
         <div class="card-header">
           <h2>Prediction Result</h2>
@@ -84,4 +85,60 @@
 </section>
 
 <script src="{{ url_for('static', filename='js/script.js') }}" defer></script>
+{% if disease %}
+
+<script>
+document.addEventListener("DOMContentLoaded", function () {
+
+    // Hide empty state
+    document.getElementById("emptyState").classList.add("hidden");
+
+    // Show result
+    document.getElementById("resultSummary").classList.remove("hidden");
+
+    // Fill data
+    document.getElementById("diseaseName").innerText = "{{ disease }}";
+
+    document.getElementById("confidenceScore").innerText =
+        "{{ confidence }}%";
+
+    document.getElementById("predictionDate").innerText =
+        "{{ date }}";
+
+    document.getElementById("diseaseDescription").innerText =
+        "{{ description }}";
+
+    // Confidence bar
+    let confidence = {{ confidence }};
+    document.getElementById("confidenceBar").style.width =
+        confidence + "%";
+
+    // Severity
+    let severity = "{{ severity }}";
+
+    let badge =
+        document.getElementById("severityBadge");
+
+    badge.innerText = severity;
+
+    if (severity === "High") {
+        badge.className =
+            "severity-badge badge-high";
+    }
+
+    else if (severity === "Medium") {
+        badge.className =
+            "severity-badge badge-medium";
+    }
+
+    else {
+        badge.className =
+            "severity-badge badge-low";
+    }
+
+});
+</script>
+
+{% endif %}
+
 {% endblock %}

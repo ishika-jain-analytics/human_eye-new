@@ -27,8 +27,23 @@ from reportlab.lib.styles import getSampleStyleSheet
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
 from reportlab.lib import colors
 from flask_dance.contrib.google import make_google_blueprint, google
+import os
+import tensorflow as tf
 
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+
+MODEL_PATH = os.path.join(
+    BASE_DIR,
+    "eye_disease_final_model.h5"
+)
+
+print("Model path:", MODEL_PATH)
+
+model = tf.keras.models.load_model(MODEL_PATH)
 app = Flask(__name__)
+model = tf.keras.models.load_model("eye_disease_final_model.h5")
+
+print("✅ Model loaded successfully")
 app.secret_key = "super-secret-key"  # replace with a secure key for production
 app.permanent_session_lifetime = timedelta(days=7)
 
@@ -114,18 +129,16 @@ def allowed_file(filename):
 
 CLASS_LABELS = [
     'Cataract',
-    'Glaucoma',
     'Diabetic Retinopathy',
-    'Macular Degeneration',
-    'Healthy'
+    'Glaucoma',
+    'Normal'
 ]
 
 DISEASE_DESCRIPTIONS = {
     'Cataract': 'Cataract causes clouding of the eye lens leading to blurry or faded vision.',
     'Glaucoma': 'Glaucoma damages the optic nerve and can gradually reduce peripheral vision.',
     'Diabetic Retinopathy': 'Diabetic retinopathy causes blood vessel damage in the retina due to diabetes.',
-    'Macular Degeneration': 'Macular degeneration affects central vision due to macula deterioration.',
-    'Healthy': 'No signs of disease were detected. Maintain regular eye care and follow-up for continued health.'
+    'Normal': 'No signs of disease were detected. Maintain regular eye care and follow-up for continued health.'
 }
 
 MODEL_PATH = os.path.join(app.root_path, 'eye_disease_final_model.h5')
@@ -181,37 +194,47 @@ def preprocess_image(image_path, target_size=(224, 224)):
     return array
 
 
-def predict_eye_disease(image_path):
+def predict_eye_disease(image_path, model):
     if model is None:
-        return {"prediction": "Error", "confidence": 0, "description": "Model is not available."}
+        return {"prediction": "Error", "confidence": 0, "description": "Model is not available.", "severity": "N/A"}
 
     try:
         img_tensor = preprocess_image(image_path)
         preds = model.predict(img_tensor)
-        
+        print("Raw prediction:", preds)
         if preds is None or len(preds) == 0:
-            return {"prediction": "Error", "confidence": 0, "description": "Invalid prediction output."}
+            return {"prediction": "Error", "confidence": 0, "description": "Invalid prediction output.", "severity": "N/A"}
         
         prediction = preds[0] if isinstance(preds, list) else preds
         prediction = np.array(prediction).flatten()
+        print("Flattened prediction:", prediction)
         prediction = np.nan_to_num(prediction, nan=0.0)
         
         if len(prediction) == 0 or np.all(prediction == 0):
-            return {"prediction": "Error", "confidence": 0, "description": "No valid prediction found."}
+            return {"prediction": "Error", "confidence": 0, "description": "No valid prediction found.", "severity": "N/A"}
         
         confidence = float(np.max(prediction) * 100)
         top_index = int(np.argmax(prediction))
-        
+        print("Top index:", top_index)
+        print("Predicted label:", CLASS_LABELS[top_index])
         disease = CLASS_LABELS[top_index] if top_index < len(CLASS_LABELS) else 'Unknown'
+        
+        if confidence > 80:
+            severity = 'High'
+        elif confidence > 50:
+            severity = 'Medium'
+        else:
+            severity = 'Low'
         
         return {
             "prediction": disease,
             "confidence": confidence,
-            "description": DISEASE_DESCRIPTIONS.get(disease, 'Prediction completed successfully.')
+            "description": DISEASE_DESCRIPTIONS.get(disease, 'Prediction completed successfully.'),
+            "severity": severity
         }
     except Exception as exc:
         logger.error('Prediction failed: %s', exc)
-        return {"prediction": "Error", "confidence": 0, "description": "Prediction failed due to an internal error."}
+        return {"prediction": "Error", "confidence": 0, "description": "Prediction failed due to an internal error.", "severity": "N/A"}
 
 
 def build_email_html(title, intro, code_label, code_value, expiry_text, support_email):
@@ -680,15 +703,13 @@ def login():
 
     return render_template("login.html")
 
-@app.route("/prediction", methods=["GET"])
-def prediction():
-    if 'user_id' not in session:
-        return redirect(url_for('login'))
-    return render_template('prediction.html', user_name=session.get('user_name'))
-
-
-@app.route("/predict", methods=["POST"])
+@app.route("/predict", methods=["GET", "POST"])
 def predict():
+    if request.method == 'GET':
+        if 'user_id' not in session:
+            return redirect(url_for('login'))
+        return render_template('prediction.html', user_name=session.get('user_name'))
+    
     if 'user_id' not in session:
         return jsonify({'error': 'Authentication required.'}), 401
 
@@ -708,10 +729,11 @@ def predict():
     save_path = os.path.join(save_dir, filename)
     image_file.save(save_path)
 
-    prediction_data = predict_eye_disease(save_path)
+    
+    prediction_data = predict_eye_disease(save_path, model)
     prediction_data['image_url'] = url_for('static', filename=f'uploads/{filename}')
     prediction_data['date'] = datetime.utcnow().strftime('%B %d, %Y')
-    return jsonify(prediction_data)
+    return render_template('prediction.html', disease=prediction_data['prediction'], confidence=round(prediction_data['confidence'], 2), severity=prediction_data['severity'], description=prediction_data['description'], date=prediction_data['date'], user_name=session.get('user_name'))
 
 @app.route('/download_report')
 def download_report():
@@ -822,7 +844,7 @@ def google_login():
         session['user_id'] = user_id
         session['user_name'] = name
         flash("Login successful!", "success")
-        return redirect(url_for("prediction"))
+        return redirect(url_for("predict"))
     
     flash("Google login failed.", "error")
     return redirect(url_for("login"))

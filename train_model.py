@@ -29,6 +29,7 @@ train_generator = train_datagen.flow_from_directory(
     batch_size=16,
     class_mode='categorical'
 )
+print("Class indices:", train_generator.class_indices)
 
 test_generator = test_datagen.flow_from_directory(
     r"C:\Users\Bhumi Jain\OneDrive\Desktop\human_eye_disease_prediction_1\dataset\test",
