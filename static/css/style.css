@@ -1094,6 +1094,61 @@ a {
   color: #dc2626;
 }
 
+.password-group {
+  position: relative;
+}
+
+.password-tooltip {
+  display: none;
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  padding: 12px 14px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+  z-index: 10;
+  margin-top: 4px;
+}
+
+.password-tooltip p {
+  margin: 0 0 0.5rem;
+  color: #334155;
+  font-size: 0.9rem;
+  font-weight: 600;
+}
+
+.password-tooltip .password-rule-list {
+  padding-left: 0;
+  margin: 0;
+}
+
+.password-tooltip .password-rule-item {
+  margin-bottom: 0.5rem;
+  font-size: 0.85rem;
+}
+
+#password:focus {
+  border-color: #2563eb;
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1);
+}
+
+.confirm-error {
+  display: none;
+  color: #dc2626;
+  font-size: 0.85rem;
+  margin-top: 4px;
+}
+
+.recaptcha-error {
+  display: none;
+  color: #dc2626;
+  font-size: 0.85rem;
+  margin-top: 4px;
+}
+
 .page-card {
   width: min(460px, 95%);
   background: #ffffff;

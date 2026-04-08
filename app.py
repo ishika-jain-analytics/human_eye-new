@@ -18,6 +18,7 @@ from PIL import Image
 from datetime import datetime, timedelta
 import secrets
 import re
+import requests
 import json
 import urllib.parse
 import urllib.request
@@ -57,8 +58,8 @@ app.config['MAIL_DEBUG'] = True
 app.config['MAIL_USERNAME'] = 'visionai.support@gmail.com'  # Replace with your Gmail
 app.config['MAIL_PASSWORD'] = 'nhis qobc zrus cdwc'  # Replace with your app password
 app.config['MAIL_DEFAULT_SENDER'] = app.config['MAIL_USERNAME']
-app.config['RECAPTCHA_SITE_KEY'] = os.environ.get('RECAPTCHA_SITE_KEY')
-app.config['RECAPTCHA_SECRET_KEY'] = os.environ.get('RECAPTCHA_SECRET_KEY')
+app.config['RECAPTCHA_SITE_KEY'] = "6LdUpqwsAAAAAOUupHoCIr-xVhrVL_6w0_l1GTDI"
+app.config['RECAPTCHA_SECRET_KEY'] = "6LdUpqwsAAAAAFfbEZS4OpFoUlqsu9dWFOf6-6Fm"
 app.config['GOOGLE_OAUTH_CLIENT_ID'] = '267279160765-h6rprgtrmuv6s0ak2d4km77sfbdl4lbb.apps.googleusercontent.com'  # Replace with actual client ID
 app.config['GOOGLE_OAUTH_CLIENT_SECRET'] = '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'  # Replace with actual client secret
 
@@ -394,6 +395,11 @@ def register():
             flash("Please enter a valid email address.", "error")
             return redirect(url_for("register"))
 
+        recaptcha_token = request.form.get("g-recaptcha-response")
+        if not recaptcha_token or not verify_recaptcha(recaptcha_token):
+            flash("Please complete the reCAPTCHA verification.", "error")
+            return redirect(url_for("register"))
+
         # Check if email already exists
         with get_db() as conn:
             existing_user = conn.execute("SELECT id FROM users WHERE email = ?", (email,)).fetchone()
@@ -457,7 +463,7 @@ def register():
         flash("OTP sent to your email. Please verify.", "success")
         return redirect(url_for("verify_otp"))
 
-    return render_template("register.html")
+    return render_template("register.html", recaptcha_site_key=app.config.get("RECAPTCHA_SITE_KEY"))
 
 @app.route("/verify-otp", methods=["GET", "POST"])
 def verify_otp():
