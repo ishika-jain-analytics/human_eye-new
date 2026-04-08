@@ -41,7 +41,7 @@ print("Model path:", MODEL_PATH)
 
 model = tf.keras.models.load_model(MODEL_PATH)
 app = Flask(__name__)
-model = tf.keras.models.load_model("eye_disease_final_model.h5")
+
 
 print("✅ Model loaded successfully")
 app.secret_key = "super-secret-key"  # replace with a secure key for production
