@@ -12,15 +12,17 @@
     </div>
 
     <div class="prediction-grid">
-      <form action="/predict" method="POST" enctype="multipart/form-data">
+      <form action="/predict" method="POST" enctype="multipart/form-data" id="predictionForm">
         <div class="prediction-card upload-card">
         <div class="card-header">
           <h2>Upload Eye Image</h2>
+          <a href="{{ url_for('my_reports') }}" class="btn secondary-button" style="font-size: 0.85rem;">📋 My Reports</a>
         </div>
+        <div id="errorMessage" class="error-message" style="display: none;"></div>
         <div id="dropzone" class="upload-dropzone">
           <div>
             <span class="drop-icon">📤</span>
-            <p class="drop-title">Drag & drop an image here</p>
+            <p class="drop-title">Drag & drop a retinal image here</p>
             <p class="drop-text">or choose from your device.</p>
           </div>
         </div>
@@ -35,9 +37,9 @@
             <span>Image preview will appear here</span>
           </div>
         </div>
-        <p class="helper-text">Upload a clear retinal or eye image for accurate prediction.</p>
+        <p class="helper-text">⚠️ Only upload retinal or eye fundus images for accurate diagnosis.</p>
         <p class="supported-text">Supported formats: JPG, PNG, JPEG</p>
-        <button type="submit" id="predictBtn" class="btn btn-primary btn-block" >Predict Disease</button>
+        <button type="submit" id="predictBtn" class="btn btn-primary btn-block" disabled>Predict Disease</button>
       </div>
       </form>
       <div class="prediction-card result-card">
@@ -46,7 +48,7 @@
         </div>
         <div class="result-state" id="resultState">
           <div class="result-empty" id="emptyState">
-            <p>Upload an image to start prediction.</p>
+            <p>Upload a retinal image to start prediction.</p>
           </div>
           <div class="result-loading hidden" id="loadingState">
             <div class="spinner"></div>

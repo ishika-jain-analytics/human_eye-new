@@ -24,9 +24,10 @@ import urllib.parse
 import urllib.request
 import logging
 from reportlab.lib.pagesizes import letter
-from reportlab.lib.styles import getSampleStyleSheet
-from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, Image as RLImage, PageBreak
 from reportlab.lib import colors
+from reportlab.lib.units import inch
 from flask_dance.contrib.google import make_google_blueprint, google
 import os
 import tensorflow as tf
@@ -113,6 +114,18 @@ def init_db():
             expiry REAL NOT NULL,
             FOREIGN KEY (user_id) REFERENCES users (id)
         )''')
+        
+        conn.execute('''CREATE TABLE IF NOT EXISTS predictions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            image_path TEXT NOT NULL,
+            disease TEXT NOT NULL,
+            confidence REAL NOT NULL,
+            severity TEXT NOT NULL,
+            date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (user_id) REFERENCES users (id)
+        )''')
+        conn.commit()
 
 EMAIL_REGEX = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 
@@ -727,7 +740,7 @@ def predict():
         return jsonify({'error': 'No file selected.'}), 400
 
     if not allowed_file(image_file.filename):
-        return jsonify({'error': 'Unsupported file format.'}), 400
+        return jsonify({'error': 'Only JPG and PNG retinal images are supported.'}), 400
 
     filename = secure_filename(image_file.filename)
     save_dir = os.path.join(app.root_path, 'static', 'uploads')
@@ -735,11 +748,23 @@ def predict():
     save_path = os.path.join(save_dir, filename)
     image_file.save(save_path)
 
-    
     prediction_data = predict_eye_disease(save_path, model)
     prediction_data['image_url'] = url_for('static', filename=f'uploads/{filename}')
     prediction_data['date'] = datetime.utcnow().strftime('%B %d, %Y')
-    return render_template('prediction.html', disease=prediction_data['prediction'], confidence=round(prediction_data['confidence'], 2), severity=prediction_data['severity'], description=prediction_data['description'], date=prediction_data['date'], user_name=session.get('user_name'))
+    prediction_data['filename'] = filename
+    
+    # Save prediction to database
+    if prediction_data['prediction'] != 'Error':
+        with get_db() as conn:
+            conn.execute(
+                '''INSERT INTO predictions (user_id, image_path, disease, confidence, severity, date)
+                   VALUES (?, ?, ?, ?, ?, ?)''',
+                (session['user_id'], f'uploads/{filename}', prediction_data['prediction'],
+                 round(prediction_data['confidence'], 2), prediction_data['severity'], datetime.utcnow())
+            )
+            conn.commit()
+    
+    return render_template('prediction.html', disease=prediction_data['prediction'], confidence=round(prediction_data['confidence'], 2), severity=prediction_data['severity'], description=prediction_data['description'], date=prediction_data['date'], user_name=session.get('user_name'), image_filename=prediction_data['filename'])
 
 @app.route('/download_report')
 def download_report():
@@ -747,41 +772,124 @@ def download_report():
     confidence = request.args.get('confidence', 'N/A')
     severity = request.args.get('severity', 'N/A')
     prediction_date = request.args.get('date', datetime.utcnow().strftime('%B %d, %Y'))
+    image_filename = request.args.get('image', '')
 
     buffer = BytesIO()
-    doc = SimpleDocTemplate(buffer, pagesize=letter, rightMargin=36, leftMargin=36, topMargin=36, bottomMargin=36)
+    doc = SimpleDocTemplate(buffer, pagesize=letter, rightMargin=36, leftMargin=36, topMargin=50, bottomMargin=36)
     styles = getSampleStyleSheet()
+    
+    # Create custom style for title
+    title_style = ParagraphStyle(
+        'CustomTitle',
+        parent=styles['Heading1'],
+        fontSize=24,
+        textColor=colors.HexColor('#0F172A'),
+        spaceAfter=6,
+        alignment=1  # centered
+    )
+    
+    story = []
 
-    flowables = [
-        Paragraph('Eye Disease Prediction Report', styles['Title']),
-        Spacer(1, 14),
-        Paragraph(f'<b>Disease Name:</b> {disease}', styles['Normal']),
-        Spacer(1, 8),
-        Paragraph(f'<b>Confidence Score:</b> {confidence}%', styles['Normal']),
-        Spacer(1, 8),
-        Paragraph(f'<b>Severity Level:</b> {severity}', styles['Normal']),
-        Spacer(1, 8),
-        Paragraph(f'<b>Prediction Date:</b> {prediction_date}', styles['Normal']),
-        Spacer(1, 14),
-        Table(
-            [['Metric', 'Value'], ['Disease', disease], ['Confidence', f'{confidence}%'], ['Severity', severity], ['Date', prediction_date]],
-            style=TableStyle([
-                ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#4F7DF3')),
-                ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
-                ('BACKGROUND', (0, 1), (-1, -1), colors.HexColor('#E6E9FF')),
-                ('GRID', (0,0), (-1,-1), 0.5, colors.grey),
-                ('FONTNAME', (0,0), (-1,0), 'Helvetica-Bold'),
-            ])
-        ),
-        Spacer(1, 12),
-        Paragraph('Generated by Eye Disease Prediction System', styles['Italic']),
+    # Header with logo and title (in a table for layout)
+    try:
+        logo_path = os.path.join(BASE_DIR, 'static', 'logo.png')
+        if os.path.exists(logo_path):
+            # Create header table with logo on left, text on right
+            logo_img = RLImage(logo_path, width=0.9*inch, height=0.9*inch)
+            header_data = [[logo_img, Paragraph('<b>EyePredict</b><br/><font size=12>Eye Disease Prediction Report</font>', styles['Normal'])]]
+            header_table = Table(header_data, colWidths=[1.2*inch, 4.8*inch])
+            header_table.setStyle(TableStyle([
+                ('ALIGN', (0, 0), (0, -1), 'CENTER'),
+                ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+                ('LEFTPADDING', (0, 0), (0, 0), 0),
+                ('RIGHTPADDING', (1, 0), (1, 0), 0),
+            ]))
+            story.append(header_table)
+        else:
+            story.append(Paragraph('EyePredict - Eye Disease Prediction Report', title_style))
+    except Exception as e:
+        logger.debug(f"Could not load logo: {e}")
+        story.append(Paragraph('EyePredict - Eye Disease Prediction Report', title_style))
+    
+    # Horizontal line below header
+    story.append(Spacer(1, 12))
+    line_table = Table([['', '', '']], colWidths=[6*inch + 72/5, 0.02*inch, 0.02*inch])
+    line_table.setStyle(TableStyle([
+        ('LINEBELOW', (0, 0), (0, 0), 2, colors.HexColor('#D1D5DB')),
+    ]))
+    story.append(line_table)
+    story.append(Spacer(1, 14))
+    
+    # Generated date
+    story.append(Paragraph(f"<font size=9 color='#64748B'><i>Report Generated: {prediction_date}</i></font>", styles['Normal']))
+    story.append(Spacer(1, 16))
+
+    # Include image if available
+    if image_filename:
+        try:
+            img_path = os.path.join(UPLOAD_FOLDER, image_filename)
+            if os.path.exists(img_path):
+                img = Image.open(img_path)
+                img_width = 3 * 72  # 3 inches
+                img_height = (img.height / img.width) * img_width
+                story.append(Paragraph('<b>Uploaded Retinal Image</b>', styles['Heading3']))
+                story.append(Spacer(1, 8))
+                story.append(RLImage(img_path, width=img_width, height=img_height))
+                story.append(Spacer(1, 18))
+        except Exception as e:
+            logger.debug(f"Could not include image in PDF: {e}")
+    
+    # Prediction Details
+    story.append(Paragraph('<b>PREDICTION RESULTS</b>', styles['Heading2']))
+    story.append(Spacer(1, 10))
+    
+    details_data = [
+        ['Metric', 'Result'],
+        ['Disease Name', disease],
+        ['Confidence Score', f'{confidence}%'],
+        ['Severity Level', severity],
+        ['Analysis Date', prediction_date]
     ]
+    
+    details_table = Table(details_data, colWidths=[2*72, 3*72])
+    details_table.setStyle(TableStyle([
+        ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#4F46E5')),
+        ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+        ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+        ('FONTSIZE', (0, 0), (-1, 0), 12),
+        ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
+        ('BACKGROUND', (0, 1), (-1, -1), colors.HexColor('#F3F4F6')),
+        ('GRID', (0, 0), (-1, -1), 1, colors.HexColor('#E5E7EB')),
+        ('FONTNAME', (0, 1), (-1, -1), 'Helvetica'),
+        ('FONTSIZE', (0, 1), (-1, -1), 10),
+        ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.HexColor('#F9FAFB')]),
+    ]))
+    story.append(details_table)
+    story.append(Spacer(1, 20))
+    
+    # Medical Description
+    description = DISEASE_DESCRIPTIONS.get(disease, 'N/A')
+    story.append(Paragraph('<b>Medical Information</b>', styles['Heading2']))
+    story.append(Spacer(1, 10))
+    story.append(Paragraph(description, styles['Normal']))
+    story.append(Spacer(1, 24))
+    
+    # Footer
+    story.append(Paragraph('<font size=8 color="#94A3B8">―――――――――――――――――――――――――――――――――――――――</font>', styles['Normal']))
+    story.append(Spacer(1, 10))
+    story.append(Paragraph(
+        '<font size=9 color="#64748B"><i>This report is generated by EyePredict AI system. '
+        'For medical concerns, please consult with an ophthalmologist. '
+        'This is not a substitute for professional medical advice.</i></font>',
+        styles['Normal']
+    ))
 
-    doc.build(flowables)
+    doc.build(story)
     buffer.seek(0)
 
     safe_date = prediction_date.replace(' ', '_').replace(',', '').replace('/', '-')
-    return send_file(buffer, as_attachment=True, download_name=f'Eye-Prediction-Report-{safe_date}.pdf', mimetype='application/pdf')
+    return send_file(buffer, as_attachment=True, download_name=f'EyePredict-Report-{safe_date}.pdf', mimetype='application/pdf')
 
 @app.route("/dashboard")
 def dashboard():
@@ -789,6 +897,21 @@ def dashboard():
         flash("Please log in to access the dashboard.", "error")
         return redirect(url_for("login"))
     return redirect(url_for('prediction'))
+
+@app.route("/my_reports")
+def my_reports():
+    if 'user_id' not in session:
+        flash("Please log in to view your reports.", "error")
+        return redirect(url_for("login"))
+    
+    with get_db() as conn:
+        reports = conn.execute(
+            "SELECT id, image_path, disease, confidence, severity, date FROM predictions WHERE user_id = ? ORDER BY date DESC",
+            (session['user_id'],)
+        ).fetchall()
+    
+    reports_list = [dict(report) for report in reports]
+    return render_template('my_reports.html', reports=reports_list, user_name=session.get('user_name'))
 
 @app.route("/auto_login", methods=["POST"])
 def auto_login():

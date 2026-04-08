@@ -15,8 +15,10 @@ const confidenceBar = document.getElementById('confidenceBar');
 const severityBadge = document.getElementById('severityBadge');
 const diseaseDescription = document.getElementById('diseaseDescription');
 const predictionDate = document.getElementById('predictionDate');
+const errorMessage = document.getElementById('errorMessage');
 
 let currentFile = null;
+let currentImageFilename = null;
 let latestResult = null;
 
 function setButtonState() {
@@ -25,8 +27,19 @@ function setButtonState() {
   downloadReportBtn.disabled = !latestResult;
 }
 
+function showErrorInline(message) {
+  if (errorMessage) {
+    errorMessage.textContent = message;
+    errorMessage.style.display = 'block';
+    setTimeout(() => {
+      errorMessage.style.display = 'none';
+    }, 5000);
+  }
+}
+
 function resetPreview() {
   currentFile = null;
+  currentImageFilename = null;
   latestResult = null;
   previewImage.src = '';
   previewImage.classList.add('hidden');
@@ -42,6 +55,7 @@ function resetPreview() {
   severityBadge.className = 'severity-badge badge-normal';
   diseaseDescription.textContent = '-';
   predictionDate.textContent = '-';
+  errorMessage.style.display = 'none';
   setButtonState();
 }
 
@@ -52,10 +66,12 @@ function updatePreview(file) {
     previewImage.classList.remove('hidden');
     previewPlaceholder.classList.add('hidden');
     currentFile = file;
+    currentImageFilename = file.name;
     emptyState.classList.add('hidden');
     loadingState.classList.add('hidden');
     resultSummary.classList.add('hidden');
     latestResult = null;
+    errorMessage.style.display = 'none';
     setButtonState();
   };
   reader.readAsDataURL(file);
@@ -65,6 +81,7 @@ function showLoading() {
   emptyState.classList.add('hidden');
   resultSummary.classList.add('hidden');
   loadingState.classList.remove('hidden');
+  errorMessage.style.display = 'none';
 }
 
 function showResult(data) {
@@ -88,14 +105,17 @@ function showResult(data) {
 }
 
 function showError(message) {
-  emptyState.querySelector('p').textContent = message;
+  showErrorInline(message);
   emptyState.classList.remove('hidden');
   loadingState.classList.add('hidden');
   resultSummary.classList.add('hidden');
 }
 
 async function submitPrediction() {
-  if (!currentFile) return;
+  if (!currentFile) {
+    showErrorInline('Please select an image first.');
+    return;
+  }
   showLoading();
 
   const formData = new FormData();
@@ -125,7 +145,11 @@ async function submitPrediction() {
 }
 
 function buildReport() {
-  if (!latestResult) return;
+  if (!latestResult) {
+    showErrorInline('No prediction available. Please make a prediction first.');
+    return;
+  }
+  const imageParam = currentImageFilename ? `&image=${encodeURIComponent(currentImageFilename)}` : '';
   const params = new URLSearchParams({
     disease: latestResult.prediction,
     confidence: latestResult.confidence.toFixed(2),
@@ -133,7 +157,7 @@ function buildReport() {
     date: latestResult.date,
   });
 
-  window.location.href = `/download_report?${params.toString()}`;
+  window.location.href = `/download_report?${params.toString()}${imageParam}`;
 }
 
 chooseImageBtn.addEventListener('click', () => previewInput.click());
@@ -149,7 +173,14 @@ previewInput.addEventListener('change', (event) => {
 
   const validTypes = ['image/jpeg', 'image/jpg', 'image/png'];
   if (!validTypes.includes(file.type)) {
-    showError('Invalid image format. Please upload JPG, JPEG, or PNG.');
+    showErrorInline('Invalid image format. Only JPG and PNG retinal images are supported.');
+    previewInput.value = '';
+    return;
+  }
+
+  const MAX_SIZE = 10 * 1024 * 1024; // 10MB
+  if (file.size > MAX_SIZE) {
+    showErrorInline('Image size is too large. Please upload an image smaller than 10MB.');
     previewInput.value = '';
     return;
   }
@@ -178,6 +209,13 @@ dropzone.addEventListener('drop', (event) => {
 
   const file = event.dataTransfer.files[0];
   if (!file) return;
+  
+  const validTypes = ['image/jpeg', 'image/jpg', 'image/png'];
+  if (!validTypes.includes(file.type)) {
+    showErrorInline('Invalid image format. Only JPG and PNG retinal images are supported.');
+    return;
+  }
+
   previewInput.files = event.dataTransfer.files;
   updatePreview(file);
 });
