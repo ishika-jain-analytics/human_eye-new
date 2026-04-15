@@ -31,6 +31,7 @@ from reportlab.lib.units import inch
 from flask_dance.contrib.google import make_google_blueprint, google
 import os
 import tensorflow as tf
+from config import Config
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
@@ -41,28 +42,27 @@ MODEL_PATH = os.path.join(
 
 print("Model path:", MODEL_PATH)
 
-model = tf.keras.models.load_model(MODEL_PATH)
 app = Flask(__name__)
-
+app.config.from_object(Config)
 
 print("✅ Model loaded successfully")
-app.secret_key = "super-secret-key"  # replace with a secure key for production
+app.secret_key = Config.SECRET_KEY
 app.permanent_session_lifetime = timedelta(days=7)
 
-# Flask-Mail configuration (replace with your Gmail credentials)
-app.config['MAIL_SERVER'] = 'smtp.gmail.com'
-app.config['MAIL_PORT'] = 587
-app.config['MAIL_USE_TLS'] = True
-app.config['MAIL_USE_SSL'] = False
-app.config['MAIL_TIMEOUT'] = 10
-app.config['MAIL_DEBUG'] = True
-app.config['MAIL_USERNAME'] = 'visionai.support@gmail.com'  # Replace with your Gmail
-app.config['MAIL_PASSWORD'] = 'nhis qobc zrus cdwc'  # Replace with your app password
-app.config['MAIL_DEFAULT_SENDER'] = app.config['MAIL_USERNAME']
-app.config['RECAPTCHA_SITE_KEY'] = "6LdUpqwsAAAAAOUupHoCIr-xVhrVL_6w0_l1GTDI"
-app.config['RECAPTCHA_SECRET_KEY'] = "6LdUpqwsAAAAAFfbEZS4OpFoUlqsu9dWFOf6-6Fm"
-app.config['GOOGLE_OAUTH_CLIENT_ID'] = '267279160765-h6rprgtrmuv6s0ak2d4km77sfbdl4lbb.apps.googleusercontent.com'  # Replace with actual client ID
-app.config['GOOGLE_OAUTH_CLIENT_SECRET'] = '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'  # Replace with actual client secret
+# Flask-Mail configuration
+app.config['MAIL_SERVER'] = Config.MAIL_SERVER
+app.config['MAIL_PORT'] = Config.MAIL_PORT
+app.config['MAIL_USE_TLS'] = Config.MAIL_USE_TLS
+app.config['MAIL_USE_SSL'] = Config.MAIL_USE_SSL
+app.config['MAIL_TIMEOUT'] = Config.MAIL_TIMEOUT
+app.config['MAIL_DEBUG'] = Config.MAIL_DEBUG
+app.config['MAIL_USERNAME'] = Config.MAIL_USERNAME
+app.config['MAIL_PASSWORD'] = Config.MAIL_PASSWORD
+app.config['MAIL_DEFAULT_SENDER'] = Config.MAIL_DEFAULT_SENDER
+app.config['RECAPTCHA_SITE_KEY'] = Config.RECAPTCHA_SITE_KEY
+app.config['RECAPTCHA_SECRET_KEY'] = Config.RECAPTCHA_SECRET_KEY
+app.config['GOOGLE_OAUTH_CLIENT_ID'] = Config.GOOGLE_OAUTH_CLIENT_ID
+app.config['GOOGLE_OAUTH_CLIENT_SECRET'] = Config.GOOGLE_OAUTH_CLIENT_SECRET
 
 logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger(__name__)
@@ -81,7 +81,7 @@ google_bp = make_google_blueprint(
 )
 app.register_blueprint(google_bp, url_prefix='/login')
 
-app.config['DATABASE'] = os.path.join(app.root_path, 'app.db')
+app.config['DATABASE'] = Config.DATABASE_URL.replace('sqlite:///', os.path.join(app.root_path, '')) if Config.DATABASE_URL.startswith('sqlite:///') else Config.DATABASE_URL
 
 def get_db():
     conn = sqlite3.connect(app.config['DATABASE'])
@@ -134,7 +134,7 @@ def is_valid_email(email):
 
 ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg'}
 
-UPLOAD_FOLDER = os.path.join(app.root_path, 'static', 'uploads')
+UPLOAD_FOLDER = Config.UPLOAD_FOLDER
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 
 
@@ -155,7 +155,7 @@ DISEASE_DESCRIPTIONS = {
     'Normal': 'No signs of disease were detected. Maintain regular eye care and follow-up for continued health.'
 }
 
-MODEL_PATH = os.path.join(app.root_path, 'eye_disease_final_model.h5')
+MODEL_PATH = Config.MODEL_PATH
 
 def custom_input_layer(*args, **kwargs):
     # Handle compatibility issues with InputLayer
@@ -438,7 +438,7 @@ def register():
                 code_label='OTP Code',
                 code_value=otp,
                 expiry_text='This OTP is valid for 10 minutes.',
-                support_email='visionai.support@gmail.com'
+                support_email=Config.SUPPORT_EMAIL
             )
             msg.body = build_email_body(
                 title='Email Verification',
@@ -446,7 +446,7 @@ def register():
                 code_label='OTP Code',
                 code_value=otp,
                 expiry_text='This OTP is valid for 10 minutes.',
-                support_email='visionai.support@gmail.com'
+                support_email=Config.SUPPORT_EMAIL
             )
 
             logger.debug("Sending OTP email to %s", email)
@@ -563,7 +563,7 @@ def resend_otp():
             code_label='OTP Code',
             code_value=otp,
             expiry_text='This OTP is valid for 10 minutes.',
-            support_email='visionai.support@gmail.com'
+            support_email=Config.SUPPORT_EMAIL
         )
         msg.body = build_email_body(
             title='OTP Verification',
@@ -571,7 +571,7 @@ def resend_otp():
             code_label='OTP Code',
             code_value=otp,
             expiry_text='This OTP is valid for 10 minutes.',
-            support_email='visionai.support@gmail.com'
+            support_email=Config.SUPPORT_EMAIL
         )
 
         mail.send(msg)
@@ -630,7 +630,7 @@ def forgot_password():
                 code_label='Password Reset OTP',
                 code_value=reset_otp,
                 expiry_text='This code expires in 5 minutes.',
-                support_email='visionai.support@gmail.com'
+                support_email=Config.SUPPORT_EMAIL
             )
             msg.body = build_email_body(
                 title='Password Reset',
@@ -638,7 +638,7 @@ def forgot_password():
                 code_label='Password Reset OTP',
                 code_value=reset_otp,
                 expiry_text='This code expires in 5 minutes.',
-                support_email='visionai.support@gmail.com'
+                support_email=Config.SUPPORT_EMAIL
             )
             mail.send(msg)
             logger.info("Password reset OTP sent successfully to %s", email)
@@ -801,7 +801,7 @@ def resend_reset_otp():
             code_label='New Password Reset OTP',
             code_value=reset_otp,
             expiry_text='This code expires in 5 minutes.',
-            support_email='visionai.support@gmail.com'
+            support_email=Config.SUPPORT_EMAIL
         )
         msg.body = build_email_body(
             title='Password Reset (Resend)',
@@ -809,7 +809,7 @@ def resend_reset_otp():
             code_label='New Password Reset OTP',
             code_value=reset_otp,
             expiry_text='This code expires in 5 minutes.',
-            support_email='visionai.support@gmail.com'
+            support_email=Config.SUPPORT_EMAIL
         )
         mail.send(msg)
         logger.info("Password reset OTP resent to %s", email)
@@ -1236,4 +1236,4 @@ def logout():
 
 if __name__ == "__main__":
     init_db()
-    app.run(debug=True)
+    app.run(debug=Config.DEBUG)
