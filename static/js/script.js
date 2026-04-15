@@ -20,9 +20,10 @@ const errorMessage = document.getElementById('errorMessage');
 let currentFile = null;
 let currentImageFilename = null;
 let latestResult = null;
+let isSubmitting = false;  // Prevent double submissions
 
 function setButtonState() {
-  predictBtn.disabled = !currentFile;
+  predictBtn.disabled = !currentFile || isSubmitting;
   resetBtn.disabled = !currentFile;
   downloadReportBtn.disabled = !latestResult;
 }
@@ -85,18 +86,29 @@ function showLoading() {
 }
 
 function showResult(data) {
-  latestResult = data;
   diseaseName.textContent = data.prediction;
-  confidenceScore.textContent = `${data.confidence.toFixed(2)}%`;
+  confidenceScore.textContent = `${Number(data.confidence).toFixed(2)}%`;
   predictionDate.textContent = data.date;
   diseaseDescription.textContent = data.description;
-  const confidencePercent = data.confidence;
+  
+  const confidencePercent = Number(data.confidence);
   confidenceBar.style.width = `${confidencePercent}%`;
   confidenceBar.style.background = confidencePercent > 50 ? '#22c55e' : '#f59e0b';
 
   const severity = data.severity || 'Normal';
   severityBadge.textContent = severity;
-  severityBadge.className = `severity-badge ${severity.toLowerCase()}`;
+  
+  // Map severity to badge class
+  const severityLower = severity.toLowerCase();
+  if (severityLower.includes('high')) {
+    severityBadge.className = 'severity-badge badge-high';
+  } else if (severityLower.includes('medium')) {
+    severityBadge.className = 'severity-badge badge-medium';
+  } else if (severityLower.includes('severe')) {
+    severityBadge.className = 'severity-badge badge-severe';
+  } else {
+    severityBadge.className = 'severity-badge badge-normal';
+  }
   
   loadingState.classList.add('hidden');
   emptyState.classList.add('hidden');
@@ -116,6 +128,15 @@ async function submitPrediction() {
     showErrorInline('Please select an image first.');
     return;
   }
+
+  // Prevent double submissions
+  if (isSubmitting) {
+    showErrorInline('Request already in progress. Please wait...');
+    return;
+  }
+
+  isSubmitting = true;
+  setButtonState();
   showLoading();
 
   const formData = new FormData();
@@ -128,19 +149,37 @@ async function submitPrediction() {
     });
 
     const data = await response.json();
-    if (!response.ok) {
+
+    if (!response.ok || !data.success) {
       if (response.status === 401) {
         window.location.href = '/login';
         return;
       }
       showError(data.error || 'Prediction failed. Please try another image.');
+      isSubmitting = false;
+      setButtonState();
       return;
     }
 
-    showResult(data);
+    // Successfully received prediction
+    latestResult = {
+      prediction: data.prediction,
+      confidence: data.confidence,
+      severity: data.severity,
+      description: data.description,
+      date: data.date,
+      filename: data.filename,
+      prediction_id: data.prediction_id
+    };
+
+    showResult(latestResult);
+    isSubmitting = false;
+    setButtonState();
   } catch (error) {
+    console.error('Fetch error:', error);
     showError('Unable to complete prediction. Please try again later.');
-    console.error(error);
+    isSubmitting = false;
+    setButtonState();
   }
 }
 
@@ -149,10 +188,10 @@ function buildReport() {
     showErrorInline('No prediction available. Please make a prediction first.');
     return;
   }
-  const imageParam = currentImageFilename ? `&image=${encodeURIComponent(currentImageFilename)}` : '';
+  const imageParam = latestResult.filename ? `&image=${encodeURIComponent(latestResult.filename)}` : '';
   const params = new URLSearchParams({
     disease: latestResult.prediction,
-    confidence: latestResult.confidence.toFixed(2),
+    confidence: Number(latestResult.confidence).toFixed(2),
     severity: latestResult.severity || 'Normal',
     date: latestResult.date,
   });

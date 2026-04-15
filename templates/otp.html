@@ -23,10 +23,99 @@
     </form>
     <div class="resend-section">
       <p class="contact-note">Didn't receive the OTP? Request a new code below.</p>
-      <form method="post" action="{{ url_for('resend_otp') }}">
-        <button type="submit" class="btn btn-outline btn-block">Resend OTP</button>
-      </form>
+      <button id="resend-btn" class="btn btn-outline btn-block" disabled>Resend OTP</button>
+      <p id="timer-text" class="timer-text">Resend in 60s</p>
     </div>
   </div>
 </section>
+
+<script>
+// OTP Resend functionality with countdown timer
+document.addEventListener('DOMContentLoaded', function() {
+    const resendBtn = document.getElementById('resend-btn');
+    const timerText = document.getElementById('timer-text');
+    let countdownInterval;
+    let timeLeft = 60; // 60 seconds countdown
+
+    // Function to start countdown
+    function startCountdown() {
+        resendBtn.disabled = true;
+        timeLeft = 60;
+
+        countdownInterval = setInterval(() => {
+            timerText.textContent = `Resend in ${timeLeft}s`;
+            timeLeft--;
+
+            if (timeLeft < 0) {
+                clearInterval(countdownInterval);
+                resendBtn.disabled = false;
+                timerText.textContent = '';
+            }
+        }, 1000);
+    }
+
+    // Function to show notification
+    function showNotification(message, type = 'success') {
+        // Remove existing notifications
+        const existingNotifications = document.querySelectorAll('.notification');
+        existingNotifications.forEach(notification => notification.remove());
+
+        // Create new notification
+        const notification = document.createElement('div');
+        notification.className = `notification ${type}`;
+        notification.textContent = message;
+
+        // Add to page
+        const authCard = document.querySelector('.auth-card');
+        authCard.insertBefore(notification, authCard.firstChild);
+
+        // Auto remove after 5 seconds
+        setTimeout(() => {
+            if (notification.parentNode) {
+                notification.remove();
+            }
+        }, 5000);
+    }
+
+    // Function to handle resend OTP
+    async function resendOTP() {
+        try {
+            const response = await fetch('/resend-otp', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                }
+            });
+
+            const data = await response.json();
+
+            if (data.success) {
+                showNotification(data.message, 'success');
+                startCountdown(); // Restart the countdown
+            } else {
+                showNotification(data.message, 'error');
+                // If rate limited, restart countdown with remaining time if provided
+                if (response.status === 429 && data.message.includes('wait')) {
+                    // Extract remaining time from message (e.g., "Please wait 45 seconds...")
+                    const match = data.message.match(/wait (\d+) seconds/);
+                    if (match) {
+                        timeLeft = parseInt(match[1]);
+                        startCountdown();
+                    }
+                }
+            }
+        } catch (error) {
+            console.error('Error resending OTP:', error);
+            showNotification('Failed to resend OTP. Please try again.', 'error');
+        }
+    }
+
+    // Event listener for resend button
+    resendBtn.addEventListener('click', resendOTP);
+
+    // Start initial countdown when page loads
+    startCountdown();
+});
+</script>
+
 {% endblock %}

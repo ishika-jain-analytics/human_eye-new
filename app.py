@@ -467,6 +467,8 @@ def register():
         session['otp'] = otp
         session['otp_email'] = email
         session['otp_time'] = time.time()
+        session['last_resend_time'] = time.time()  # Initialize resend tracking
+        session['resend_count'] = 0  # Initialize resend count
         session['user_data'] = {
             'fullname': fullname,
             'email': email,
@@ -534,6 +536,19 @@ def resend_otp():
     if 'otp_email' not in session:
         return jsonify({"success": False, "message": "No OTP request found."}), 400
 
+    # Check rate limiting: 60 seconds cooldown
+    last_resend = session.get('last_resend_time', 0)
+    current_time = time.time()
+    if current_time - last_resend < 60:
+        remaining_time = int(60 - (current_time - last_resend))
+        return jsonify({"success": False, "message": f"Please wait {remaining_time} seconds before requesting a new OTP."}), 429
+
+    # Check maximum attempts: 3 resends allowed
+    resend_count = session.get('resend_count', 0)
+    if resend_count >= 3:
+        return jsonify({"success": False, "message": "Maximum resend attempts exceeded. Please register again."}), 429
+
+    # Generate new OTP
     otp = ''.join(random.choices('0123456789', k=6))
 
     try:
@@ -568,27 +583,42 @@ def resend_otp():
         logger.exception("Unexpected error while resending OTP to %s: %s", session.get('otp_email'), e)
         return jsonify({"success": False, "message": "Failed to resend OTP email due to an unexpected error."}), 500
 
+    # Update session with new OTP and tracking info
     session['otp'] = otp
     session['otp_time'] = time.time()
+    session['last_resend_time'] = current_time
+    session['resend_count'] = resend_count + 1
 
     return jsonify({"success": True, "message": "OTP resent successfully."})
 
 @app.route("/forgot-password", methods=["GET", "POST"])
 def forgot_password():
+    """Handle forgot password - validate email and send OTP"""
     if request.method == "POST":
-        email = request.form.get("email")
+        email = request.form.get("email", "").strip().lower()
+        
+        # Validate email provided
         if not email:
-            flash("Please enter your email.", "error")
+            flash("Please enter your email address.", "error")
+            return redirect(url_for("forgot_password"))
+        
+        if not is_valid_email(email):
+            flash("Please enter a valid email address.", "error")
             return redirect(url_for("forgot_password"))
 
+        # Check if email exists in database
         with get_db() as conn:
-            user = conn.execute("SELECT * FROM users WHERE email = ?", (email,)).fetchone()
+            user = conn.execute("SELECT id FROM users WHERE email = ?", (email,)).fetchone()
 
         if not user:
-            flash("Email not registered.", "error")
+            flash("Email not registered. Please check or register a new account.", "error")
+            logger.warning("Password reset attempt for non-existent email: %s", email)
             return redirect(url_for("forgot_password"))
 
+        # Generate secure OTP
         reset_otp = ''.join(random.choices('0123456789', k=6))
+        current_time = time.time()
+        
         try:
             logger.debug("Sending password reset OTP to %s", email)
             msg = Message('Password Reset - Eye Disease Prediction System',
@@ -596,87 +626,217 @@ def forgot_password():
                           recipients=[email])
             msg.html = build_email_html(
                 title='Password Reset',
-                intro='Use the OTP below to reset your password for your Eye Disease Prediction System account.',
+                intro='We received a request to reset your password. Use the OTP below to continue. This OTP is valid for only 5 minutes.',
                 code_label='Password Reset OTP',
                 code_value=reset_otp,
-                expiry_text='This OTP is valid for 10 minutes.',
+                expiry_text='This code expires in 5 minutes.',
                 support_email='visionai.support@gmail.com'
             )
             msg.body = build_email_body(
                 title='Password Reset',
-                intro='Use the OTP below to reset your password for your Eye Disease Prediction System account.',
+                intro='We received a request to reset your password. Use the OTP below to continue. This OTP is valid for only 5 minutes.',
                 code_label='Password Reset OTP',
                 code_value=reset_otp,
-                expiry_text='This OTP is valid for 10 minutes.',
+                expiry_text='This code expires in 5 minutes.',
                 support_email='visionai.support@gmail.com'
             )
             mail.send(msg)
-            logger.info("Password reset OTP email sent successfully to %s", email)
+            logger.info("Password reset OTP sent successfully to %s", email)
         except SMTPException as e:
-            logger.exception("SMTP error while sending password reset OTP to %s: %s", email, e)
-            flash("Failed to send password reset email due to mail server error. Please try again later.", "error")
+            logger.exception("SMTP error sending password reset OTP to %s: %s", email, e)
+            flash("Failed to send password reset email. Please verify email and try again.", "error")
             return redirect(url_for("forgot_password"))
         except Exception as e:
-            logger.exception("Unexpected error while sending password reset OTP to %s: %s", email, e)
-            flash("Failed to send password reset email. Please try again later.", "error")
+            logger.exception("Error sending password reset OTP to %s: %s", email, e)
+            flash("An unexpected error occurred. Please try again later.", "error")
             return redirect(url_for("forgot_password"))
 
+        # Store reset session data with rate limiting info
         session['reset_email'] = email
         session['reset_otp'] = reset_otp
-        session['reset_time'] = time.time()
+        session['reset_time'] = current_time
+        session['reset_attempts'] = 0
+        session['last_resend_time'] = current_time
+        session['resend_count'] = 0
 
-        flash("Password reset OTP sent to your email.", "success")
+        flash("Password reset OTP has been sent to your email.", "success")
         return redirect(url_for("reset_password"))
 
     return render_template("forgot_password.html")
 
-@app.route("/reset-password")
+@app.route("/reset-password", methods=["GET"])
 def reset_password():
+    """Display password reset form with OTP verification"""
     if 'reset_email' not in session:
-        flash("No password reset request found. Please submit your email.", "error")
+        flash("No password reset request found. Please start over.", "error")
+        return redirect(url_for("forgot_password"))
+    
+    # Check if OTP has expired (5 minutes)
+    if time.time() - session.get('reset_time', 0) > 300:
+        session.pop('reset_email', None)
+        session.pop('reset_otp', None)
+        session.pop('reset_time', None)
+        flash("OTP has expired. Please request a new one.", "error")
         return redirect(url_for("forgot_password"))
 
-    return render_template("reset_password.html")
+    return render_template("reset_password.html", reset_email=session.get('reset_email'))
 
 @app.route("/verify-reset", methods=["POST"])
 def verify_reset():
+    """Verify OTP and reset password"""
     if 'reset_email' not in session or 'reset_otp' not in session:
-        flash("No reset request found. Please start again.", "error")
+        flash("No password reset request found. Please start over.", "error")
         return redirect(url_for("forgot_password"))
 
-    entered_otp = request.form.get("otp")
-    new_password = request.form.get("password")
-    confirm_password = request.form.get("confirm_password")
+    entered_otp = request.form.get("otp", "").strip()
+    new_password = request.form.get("password", "")
+    confirm_password = request.form.get("confirm_password", "")
 
+    # Validate all fields provided
     if not all([entered_otp, new_password, confirm_password]):
         flash("All fields are required.", "error")
+        return redirect(url_for("reset_password"))
+
+    # Validate OTP format (6 digits)
+    if len(entered_otp) != 6 or not entered_otp.isdigit():
+        flash("OTP must be 6 digits.", "error")
+        return redirect(url_for("reset_password"))
+
+    # Validate password requirements
+    if len(new_password) < 8:
+        flash("Password must be at least 8 characters long.", "error")
         return redirect(url_for("reset_password"))
 
     if new_password != confirm_password:
         flash("Passwords do not match.", "error")
         return redirect(url_for("reset_password"))
 
-    if time.time() - session['reset_time'] > 600:
+    # Check OTP expiry (5 minutes)
+    if time.time() - session.get('reset_time', 0) > 300:
         flash("OTP has expired. Please request a new one.", "error")
         session.pop('reset_email', None)
         session.pop('reset_otp', None)
         session.pop('reset_time', None)
         return redirect(url_for("forgot_password"))
 
+    # Track failed attempts
+    session['reset_attempts'] = session.get('reset_attempts', 0) + 1
+    
+    # Limit verification attempts to 3
+    if session['reset_attempts'] > 3:
+        flash("Too many failed attempts. Please request a new OTP.", "error")
+        session.pop('reset_email', None)
+        session.pop('reset_otp', None)
+        session.pop('reset_time', None)
+        return redirect(url_for("forgot_password"))
+
+    # Verify OTP
     if entered_otp != session['reset_otp']:
-        flash("Invalid OTP. Please try again.", "error")
+        remaining_attempts = 3 - session['reset_attempts']
+        flash(f"Invalid OTP. {remaining_attempts} attempts remaining.", "error")
         return redirect(url_for("reset_password"))
 
+    # Hash and update password in database
     hashed_password = generate_password_hash(new_password)
-    with get_db() as conn:
-        conn.execute("UPDATE users SET password = ? WHERE email = ?", (hashed_password, session['reset_email']))
+    try:
+        with get_db() as conn:
+            conn.execute(
+                "UPDATE users SET password = ? WHERE email = ?",
+                (hashed_password, session['reset_email'])
+            )
+            conn.commit()
+        logger.info("Password reset successful for email: %s", session['reset_email'])
+    except Exception as e:
+        logger.exception("Error updating password for email %s: %s", session['reset_email'], e)
+        flash("An error occurred while resetting your password. Please try again.", "error")
+        return redirect(url_for("reset_password"))
 
+    # Clear session data
     session.pop('reset_email', None)
     session.pop('reset_otp', None)
     session.pop('reset_time', None)
+    session.pop('reset_attempts', None)
+    session.pop('last_resend_time', None)
+    session.pop('resend_count', None)
 
-    flash("Password reset successful. Please login.", "success")
+    flash("Password reset successful! You can now login with your new password.", "success")
     return redirect(url_for("login"))
+
+@app.route("/resend-reset-otp", methods=["POST"])
+def resend_reset_otp():
+    """Resend OTP during password reset with rate limiting"""
+    if 'reset_email' not in session:
+        return jsonify({"success": False, "message": "No password reset request found."}), 400
+
+    # Check rate limiting: 60 seconds cooldown
+    last_resend = session.get('last_resend_time', 0)
+    current_time = time.time()
+    if current_time - last_resend < 60:
+        remaining_time = int(60 - (current_time - last_resend))
+        return jsonify({
+            "success": False,
+            "message": f"Please wait {remaining_time} seconds before requesting a new OTP."
+        }), 429
+
+    # Check maximum resend attempts (3 total resends allowed)
+    resend_count = session.get('resend_count', 0)
+    if resend_count >= 3:
+        return jsonify({
+            "success": False,
+            "message": "Maximum resend attempts exceeded. Please request a new reset."
+        }), 429
+
+    # Generate new OTP
+    reset_otp = ''.join(random.choices('0123456789', k=6))
+    email = session['reset_email']
+
+    try:
+        logger.debug("Resending password reset OTP to %s", email)
+        msg = Message('Password Reset - Eye Disease Prediction System',
+                      sender=app.config.get('MAIL_DEFAULT_SENDER'),
+                      recipients=[email])
+        msg.html = build_email_html(
+            title='Password Reset (Resend)',
+            intro='Here is your new password reset OTP. This code is valid for 5 minutes.',
+            code_label='New Password Reset OTP',
+            code_value=reset_otp,
+            expiry_text='This code expires in 5 minutes.',
+            support_email='visionai.support@gmail.com'
+        )
+        msg.body = build_email_body(
+            title='Password Reset (Resend)',
+            intro='Here is your new password reset OTP. This code is valid for 5 minutes.',
+            code_label='New Password Reset OTP',
+            code_value=reset_otp,
+            expiry_text='This code expires in 5 minutes.',
+            support_email='visionai.support@gmail.com'
+        )
+        mail.send(msg)
+        logger.info("Password reset OTP resent to %s", email)
+    except SMTPException as e:
+        logger.exception("SMTP error resending password reset OTP: %s", e)
+        return jsonify({
+            "success": False,
+            "message": "Failed to resend OTP. Please try again."
+        }), 500
+    except Exception as e:
+        logger.exception("Error resending password reset OTP: %s", e)
+        return jsonify({
+            "success": False,
+            "message": "An error occurred. Please try again."
+        }), 500
+
+    # Update session
+    session['reset_otp'] = reset_otp
+    session['reset_time'] = current_time
+    session['last_resend_time'] = current_time
+    session['resend_count'] = resend_count + 1
+    session['reset_attempts'] = 0
+
+    return jsonify({
+        "success": True,
+        "message": "New OTP sent to your email."
+    }), 200
 
 @app.route("/login", methods=["GET", "POST"])
 def login():
@@ -718,9 +878,24 @@ def login():
                            (user['id'], token, expiry))
             session['remember_token'] = token
         flash("Login successful!", "success")
-        return redirect(url_for("prediction"))
+        return redirect(url_for("predict"))
 
     return render_template("login.html")
+
+def check_duplicate_prediction(user_id, image_hash, disease):
+    """
+    Check if a prediction already exists for this user with the same image and disease.
+    Prevents duplicate records within a 30-second window to handle accidental double submissions.
+    """
+    with get_db() as conn:
+        result = conn.execute(
+            '''SELECT id, date FROM predictions 
+               WHERE user_id = ? AND disease = ? AND image_path LIKE ? 
+               AND datetime(date) > datetime('now', '-30 seconds')
+               ORDER BY date DESC LIMIT 1''',
+            (user_id, disease, f'%{image_hash}%')
+        ).fetchone()
+    return result is not None
 
 @app.route("/predict", methods=["GET", "POST"])
 def predict():
@@ -729,42 +904,76 @@ def predict():
             return redirect(url_for('login'))
         return render_template('prediction.html', user_name=session.get('user_name'))
     
+    # POST request - AJAX submission from frontend
     if 'user_id' not in session:
-        return jsonify({'error': 'Authentication required.'}), 401
+        return jsonify({'success': False, 'error': 'Authentication required.'}), 401
 
     if 'image' not in request.files:
-        return jsonify({'error': 'No image file uploaded.'}), 400
+        return jsonify({'success': False, 'error': 'No image file uploaded.'}), 400
 
     image_file = request.files['image']
     if image_file.filename == '':
-        return jsonify({'error': 'No file selected.'}), 400
+        return jsonify({'success': False, 'error': 'No file selected.'}), 400
 
     if not allowed_file(image_file.filename):
-        return jsonify({'error': 'Only JPG and PNG retinal images are supported.'}), 400
+        return jsonify({'success': False, 'error': 'Only JPG and PNG retinal images are supported.'}), 400
 
-    filename = secure_filename(image_file.filename)
+    # Create filename with timestamp to ensure uniqueness
+    timestamp = int(time.time() * 1000)  # milliseconds for uniqueness
+    base_filename = os.path.splitext(secure_filename(image_file.filename))[0]
+    extension = os.path.splitext(image_file.filename)[1]
+    filename = f"{base_filename}_{timestamp}{extension}"
+    
     save_dir = os.path.join(app.root_path, 'static', 'uploads')
     os.makedirs(save_dir, exist_ok=True)
     save_path = os.path.join(save_dir, filename)
     image_file.save(save_path)
 
+    # Generate prediction
     prediction_data = predict_eye_disease(save_path, model)
     prediction_data['image_url'] = url_for('static', filename=f'uploads/{filename}')
     prediction_data['date'] = datetime.utcnow().strftime('%B %d, %Y')
     prediction_data['filename'] = filename
     
-    # Save prediction to database
+    # Save prediction to database (only if not an error and not a duplicate)
+    prediction_id = None
     if prediction_data['prediction'] != 'Error':
-        with get_db() as conn:
-            conn.execute(
-                '''INSERT INTO predictions (user_id, image_path, disease, confidence, severity, date)
-                   VALUES (?, ?, ?, ?, ?, ?)''',
-                (session['user_id'], f'uploads/{filename}', prediction_data['prediction'],
-                 round(prediction_data['confidence'], 2), prediction_data['severity'], datetime.utcnow())
-            )
-            conn.commit()
+        # Check for duplicates before inserting
+        if not check_duplicate_prediction(session['user_id'], base_filename, prediction_data['prediction']):
+            try:
+                with get_db() as conn:
+                    conn.execute(
+                        '''INSERT INTO predictions (user_id, image_path, disease, confidence, severity, date)
+                           VALUES (?, ?, ?, ?, ?, ?)''',
+                        (session['user_id'], f'uploads/{filename}', prediction_data['prediction'],
+                         round(prediction_data['confidence'], 2), prediction_data['severity'], 
+                         datetime.utcnow())
+                    )
+                    conn.commit()
+                    # Get the inserted prediction ID
+                    result = conn.execute(
+                        "SELECT last_insert_rowid() as id"
+                    ).fetchone()
+                    if result:
+                        prediction_id = result['id']
+                logger.info(f"Prediction saved for user {session['user_id']}: {prediction_data['prediction']} (ID: {prediction_id})")
+            except Exception as e:
+                logger.exception(f"Error saving prediction: {e}")
+                # Continue anyway - we still return the prediction result
+        else:
+            logger.warning(f"Duplicate prediction detected for user {session['user_id']}. Skipping database insert.")
     
-    return render_template('prediction.html', disease=prediction_data['prediction'], confidence=round(prediction_data['confidence'], 2), severity=prediction_data['severity'], description=prediction_data['description'], date=prediction_data['date'], user_name=session.get('user_name'), image_filename=prediction_data['filename'])
+    # Return JSON response for AJAX handler
+    return jsonify({
+        'success': True,
+        'prediction': prediction_data['prediction'],
+        'confidence': round(prediction_data['confidence'], 2),
+        'severity': prediction_data['severity'],
+        'description': prediction_data['description'],
+        'date': prediction_data['date'],
+        'filename': prediction_data['filename'],
+        'prediction_id': prediction_id
+    }), 200
 
 @app.route('/download_report')
 def download_report():
@@ -896,7 +1105,36 @@ def dashboard():
     if 'user_id' not in session:
         flash("Please log in to access the dashboard.", "error")
         return redirect(url_for("login"))
-    return redirect(url_for('prediction'))
+    return redirect(url_for('predict'))
+
+# DEBUG ROUTE - Remove after fixing duplicate issue
+@app.route("/debug_predictions")
+def debug_predictions():
+    """Debug route to check for duplicate predictions in database."""
+    if 'user_id' not in session:
+        return jsonify({'error': 'Not authenticated'}), 401
+    
+    user_id = session['user_id']
+    
+    with get_db() as conn:
+        # Get all predictions
+        all_predictions = conn.execute(
+            'SELECT id, disease, confidence, date FROM predictions WHERE user_id = ? ORDER BY date DESC',
+            (user_id,)
+        ).fetchall()
+        
+        # Count by disease to find duplicates
+        disease_counts = {}
+        for pred in all_predictions:
+            disease = pred['disease']
+            disease_counts[disease] = disease_counts.get(disease, 0) + 1
+    
+    return jsonify({
+        'total_predictions': len(all_predictions),
+        'predictions': [dict(p) for p in all_predictions],
+        'disease_counts': disease_counts,
+        'duplicates_detected': {d: c for d, c in disease_counts.items() if c > 1}
+    }, 200)
 
 @app.route("/my_reports")
 def my_reports():
@@ -904,13 +1142,20 @@ def my_reports():
         flash("Please log in to view your reports.", "error")
         return redirect(url_for("login"))
     
+    # Fetch reports for current user, ordered by latest first
+    # Using DISTINCT ON id to prevent any duplicate rows in case they exist in database
     with get_db() as conn:
         reports = conn.execute(
-            "SELECT id, image_path, disease, confidence, severity, date FROM predictions WHERE user_id = ? ORDER BY date DESC",
+            '''SELECT DISTINCT id, image_path, disease, confidence, severity, date 
+               FROM predictions 
+               WHERE user_id = ? 
+               ORDER BY date DESC''',
             (session['user_id'],)
         ).fetchall()
     
     reports_list = [dict(report) for report in reports]
+    logger.debug(f"Loaded {len(reports_list)} reports for user {session['user_id']}")
+    
     return render_template('my_reports.html', reports=reports_list, user_name=session.get('user_name'))
 
 @app.route("/auto_login", methods=["POST"])
