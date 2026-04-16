@@ -126,6 +126,8 @@ def init_db():
             FOREIGN KEY (user_id) REFERENCES users (id)
         )''')
         conn.commit()
+        with app.app_context():
+            init_db()
 
 EMAIL_REGEX = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 
@@ -1236,5 +1238,7 @@ def logout():
     return redirect(url_for("home"))
 
 if __name__ == "__main__":
-    init_db()
-    app.run(debug=Config.DEBUG)
+
+    import os
+    port = int(os.environ.get("PORT", 10000))
+    app.run(host="0.0.0.0", port=port)
