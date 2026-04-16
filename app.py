@@ -1106,7 +1106,7 @@ def dashboard():
         flash("Please log in to access the dashboard.", "error")
         return redirect(url_for("login"))
     return redirect(url_for('predict'))
-<<<<<<< Updated upstream
+
 
 # DEBUG ROUTE - Remove after fixing duplicate issue
 @app.route("/debug_predictions")
@@ -1136,8 +1136,6 @@ def debug_predictions():
         'disease_counts': disease_counts,
         'duplicates_detected': {d: c for d, c in disease_counts.items() if c > 1}
     }, 200)
-=======
->>>>>>> Stashed changes
 
 @app.route("/my_reports")
 def my_reports():
