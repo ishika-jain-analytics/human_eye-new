@@ -187,8 +187,8 @@ User Image → Image Preprocessing → MobileNetV2 Model → Prediction → Resu
 ### Clone repository
 
 ```bash
-git clone https://github.com/your-username/human_eye_project.git
-cd human_eye_project
+git https://github.com/ishika-jain-analytics/human_eye-new.git
+cd human_eye-new
 ```
 
 ### Create virtual environment
