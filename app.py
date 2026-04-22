@@ -35,17 +35,32 @@ from config import Config
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
+import os
+from tensorflow.keras.models import load_model
+
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+
 MODEL_PATH = os.path.join(
     BASE_DIR,
     "eye_disease_final_model.h5"
 )
 
+# 🔎 Ye lines add karo (yahi important test hai)
 print("Model path:", MODEL_PATH)
+print("Model exists:", os.path.exists(MODEL_PATH))
 
+# 🔴 Safe model loading
+model = None
+
+if os.path.exists(MODEL_PATH):
+    model = load_model(MODEL_PATH)
+    print("✅ Model loaded successfully")
+else:
+    print("❌ Model file NOT found")
+
+# Flask app initialization
 app = Flask(__name__)
 app.config.from_object(Config)
-
-print("✅ Model loaded successfully")
 app.secret_key = Config.SECRET_KEY
 app.permanent_session_lifetime = timedelta(days=7)
 
