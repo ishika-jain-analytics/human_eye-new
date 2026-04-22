@@ -53,7 +53,7 @@ print("Model exists:", os.path.exists(MODEL_PATH))
 model = None
 
 if os.path.exists(MODEL_PATH):
-    model = load_model(MODEL_PATH)
+    model = load_model(MODEL_PATH, compile=False)
     print("✅ Model loaded successfully")
 else:
     print("❌ Model file NOT found")
