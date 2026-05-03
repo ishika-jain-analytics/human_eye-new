@@ -2,8 +2,8 @@ import os
 os.environ['OAUTHLIB_INSECURE_TRANSPORT'] = '1'
 
 from io import BytesIO
-from flask import Flask
 from authlib.integrations.flask_client import OAuth
+from flask import Flask
 from flask import Flask, render_template, request, redirect, url_for, flash, session, jsonify, send_file
 import sqlite3
 from werkzeug.security import generate_password_hash, check_password_hash
@@ -28,9 +28,6 @@ from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, Image as RLImage, PageBreak
 from reportlab.lib import colors
 from reportlab.lib.units import inch
-from flask_dance.contrib.google import make_google_blueprint, google
-import os
-import tensorflow as tf
 from config import Config
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -67,19 +64,15 @@ app.config['GOOGLE_OAUTH_CLIENT_SECRET'] = Config.GOOGLE_OAUTH_CLIENT_SECRET
 logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger(__name__)
 mail = Mail(app)
-from flask_dance.contrib.google import make_google_blueprint
 
-google_bp = make_google_blueprint(
+oauth = OAuth(app)
+google = oauth.register(
+    name='google',
     client_id=app.config['GOOGLE_OAUTH_CLIENT_ID'],
     client_secret=app.config['GOOGLE_OAUTH_CLIENT_SECRET'],
-    scope=[
-        "https://www.googleapis.com/auth/userinfo.email",
-        "https://www.googleapis.com/auth/userinfo.profile",
-        "openid"
-    ],
-    redirect_to="google_login"
+    server_metadata_url='https://accounts.google.com/.well-known/openid-configuration',
+    client_kwargs={'scope': 'openid email profile'}
 )
-app.register_blueprint(google_bp, url_prefix='/login')
 
 app.config['DATABASE'] = Config.DATABASE_URL.replace('sqlite:///', os.path.join(app.root_path, '')) if Config.DATABASE_URL.startswith('sqlite:///') else Config.DATABASE_URL
 
@@ -94,18 +87,17 @@ def init_db():
         conn.execute('''CREATE TABLE IF NOT EXISTS users (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             name TEXT,
-            fullname TEXT,
-            email TEXT UNIQUE NOT NULL,
-            password TEXT NOT NULL,
-            verified INTEGER DEFAULT 0
+            email TEXT UNIQUE,
+            password TEXT,
+            google_id TEXT
         )''')
         cols = [row['name'] for row in conn.execute("PRAGMA table_info(users)").fetchall()]
+        if 'google_id' not in cols:
+            conn.execute("ALTER TABLE users ADD COLUMN google_id TEXT")
         if 'verified' not in cols:
             conn.execute("ALTER TABLE users ADD COLUMN verified INTEGER DEFAULT 0")
-        if 'name' not in cols:
-            conn.execute("ALTER TABLE users ADD COLUMN name TEXT")
         if 'fullname' not in cols:
-            conn.execute("ALTER TABLE users ADD COLUMN fullname TEXT")
+            conn.execute("ALTER TABLE users ADD COLUMN fullname TEXT")  # Keep for compatibility
 
         conn.execute('''CREATE TABLE IF NOT EXISTS remember_tokens (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -126,8 +118,6 @@ def init_db():
             FOREIGN KEY (user_id) REFERENCES users (id)
         )''')
         conn.commit()
-        with app.app_context():
-            init_db()
 
 EMAIL_REGEX = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 
@@ -840,6 +830,43 @@ def resend_reset_otp():
         "message": "New OTP sent to your email."
     }), 200
 
+@app.route('/login/google')
+def google_login():
+    redirect_uri = url_for('google_callback', _external=True)
+    return google.authorize_redirect(redirect_uri)
+
+@app.route('/google/callback')
+def google_callback():
+    try:
+        token = google.authorize_access_token()
+        userinfo = google.get('https://www.googleapis.com/oauth2/v2/userinfo').json()
+        email = userinfo.get('email')
+        name = userinfo.get('name')
+        google_id = userinfo.get('id')
+
+        if not email:
+            flash("Email not provided by Google. Please try again.", "error")
+            return redirect(url_for('login'))
+
+        with get_db() as conn:
+            user = conn.execute("SELECT * FROM users WHERE email = ? OR google_id = ?", (email, google_id)).fetchone()
+            if user:
+                session['user_id'] = user['id']
+                session['user_name'] = user['name'] or user['fullname']
+                flash("Login successful!", "success")
+                return redirect(url_for('dashboard'))
+            else:
+                conn.execute("INSERT INTO users (name, email, google_id) VALUES (?, ?, ?)", (name, email, google_id))
+                user_id = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
+                session['user_id'] = user_id
+                session['user_name'] = name
+                flash("Account created and login successful!", "success")
+                return redirect(url_for('dashboard'))
+    except Exception as e:
+        logger.error(f"OAuth error: {e}")
+        flash("OAuth login failed. Please try again.", "error")
+        return redirect(url_for('login'))
+
 @app.route("/login", methods=["GET", "POST"])
 def login():
     if 'user_id' in session:
@@ -1193,39 +1220,6 @@ def login_google():
         return redirect(url_for('google.login'))
     return redirect(url_for('google_login'))
 
-@app.route("/google_login")
-def google_login():
-    if not google.authorized:
-        return redirect(url_for('login'))
-    
-    resp = google.get('/oauth2/v2/userinfo')
-    if resp.ok:
-        user_info = resp.json()
-        email = user_info['email']
-        name = user_info['name']
-        
-        # Check if user exists
-        with get_db() as conn:
-            user = conn.execute("SELECT * FROM users WHERE email = ?", (email,)).fetchone()
-            if not user:
-                # Create new user
-                hashed_password = generate_password_hash(secrets.token_urlsafe(16))  # Random password
-                cursor = conn.cursor()
-                cursor.execute("INSERT INTO users (fullname, email, password, verified) VALUES (?, ?, ?, 1)",
-                               (name, email, hashed_password))
-                conn.commit()
-                user_id = cursor.lastrowid
-            else:
-                user_id = user['id']
-        
-        session['user_id'] = user_id
-        session['user_name'] = name
-        flash("Login successful!", "success")
-        return redirect(url_for("predict"))
-    
-    flash("Google login failed.", "error")
-    return redirect(url_for("login"))
-
 @app.route("/logout")
 def logout():
     # If remember token exists, delete from DB
@@ -1238,7 +1232,8 @@ def logout():
     return redirect(url_for("home"))
 
 if __name__ == "__main__":
-
+    with app.app_context():
+        init_db()
     import os
     port = int(os.environ.get("PORT", 10000))
     app.run(host="0.0.0.0", port=port)
