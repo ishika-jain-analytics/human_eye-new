@@ -1,5 +1,7 @@
 import os
-os.environ['OAUTHLIB_INSECURE_TRANSPORT'] = '1'
+
+if os.environ.get('FLASK_ENV') == 'development' or os.environ.get('DEBUG') == 'true':
+    os.environ['OAUTHLIB_INSECURE_TRANSPORT'] = '1'
 
 from io import BytesIO
 from authlib.integrations.flask_client import OAuth
@@ -339,12 +341,13 @@ def verify_recaptcha(token):
         response.raise_for_status()
         result = response.json()
         success = result.get('success', False)
-        score = result.get('score', 0)
+        
+        logger.debug('reCAPTCHA API response: success=%s, error_codes=%s', success, result.get('error-codes', []))
         
         if not success:
-            logger.warning('reCAPTCHA verification failed: success=False, error_codes=%s', result.get('error-codes', []))
+            logger.warning('reCAPTCHA verification failed: %s', result.get('error-codes', []))
         
-        return success and score > 0.5
+        return success
     except requests.exceptions.Timeout:
         logger.error('reCAPTCHA verification timeout')
         return False
@@ -882,47 +885,68 @@ def google_login():
 @app.route('/google/callback')
 def google_callback():
     try:
-        token = google.authorize_access_token()
-        userinfo = google.get('https://www.googleapis.com/oauth2/v2/userinfo').json()
-        email = userinfo.get('email')
-        name = userinfo.get('name') or ''
-        google_id = userinfo.get('id')
+        try:
+            token = google.authorize_access_token()
+            userinfo = google.get('https://www.googleapis.com/oauth2/v2/userinfo').json()
+        except Exception as auth_error:
+            logger.exception("OAuth authorization failed: %s", auth_error)
+            flash("Failed to authorize with Google. Please try again.", "error")
+            return redirect(url_for('login'))
+        
+        email = userinfo.get('email', '').strip()
+        name = (userinfo.get('name') or '').strip()
+        google_id = userinfo.get('id', '').strip()
 
         if not email:
+            logger.warning('Google OAuth returned no email')
             flash("Email not provided by Google. Please try again.", "error")
             return redirect(url_for('login'))
 
-        with get_db() as conn:
-            user = conn.execute("SELECT * FROM users WHERE email = ?", (email,)).fetchone()
-            if user:
-                if google_id and not user['google_id']:
-                    conn.execute("UPDATE users SET google_id = ? WHERE id = ?", (google_id, user['id']))
-                session['user_id'] = user['id']
-                session['user_name'] = user['name'] or (user['fullname'] if 'fullname' in user.keys() else email)
-                flash("Login successful!", "success")
-                return redirect(url_for('dashboard'))
-
-            try:
-                conn.execute(
-                    "INSERT INTO users (name, email, password, google_id) VALUES (?, ?, NULL, ?)",
-                    (name, email, google_id)
-                )
-                user_id = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
-            except sqlite3.IntegrityError:
-                existing_user = conn.execute("SELECT * FROM users WHERE email = ?", (email,)).fetchone()
-                if existing_user:
-                    session['user_id'] = existing_user['id']
-                    session['user_name'] = existing_user['name'] or (existing_user['fullname'] if 'fullname' in existing_user.keys() else email)
+        try:
+            with get_db() as conn:
+                user = conn.execute("SELECT * FROM users WHERE email = ?", (email,)).fetchone()
+                if user:
+                    if google_id and not user['google_id']:
+                        conn.execute("UPDATE users SET google_id = ? WHERE id = ?", (google_id, user['id']))
+                    session['user_id'] = user['id']
+                    session['user_name'] = user['name'] or user['fullname'] or email
+                    session.permanent = True
+                    logger.info("Google OAuth login successful for email: %s", email)
                     flash("Login successful!", "success")
                     return redirect(url_for('dashboard'))
-                raise
 
-            session['user_id'] = user_id
-            session['user_name'] = name or email
-            flash("Account created and login successful!", "success")
-            return redirect(url_for('dashboard'))
+                try:
+                    conn.execute(
+                        "INSERT INTO users (name, email, password, google_id, verified) VALUES (?, ?, NULL, ?, 1)",
+                        (name, email, google_id)
+                    )
+                    user_id = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
+                except sqlite3.IntegrityError as integrity_error:
+                    logger.warning("Integrity error during OAuth registration: %s", integrity_error)
+                    existing_user = conn.execute("SELECT * FROM users WHERE email = ?", (email,)).fetchone()
+                    if existing_user:
+                        if google_id and not existing_user['google_id']:
+                            conn.execute("UPDATE users SET google_id = ? WHERE id = ?", (google_id, existing_user['id']))
+                        session['user_id'] = existing_user['id']
+                        session['user_name'] = existing_user['name'] or existing_user['fullname'] or email
+                        session.permanent = True
+                        logger.info("Google OAuth login successful (existing) for email: %s", email)
+                        flash("Login successful!", "success")
+                        return redirect(url_for('dashboard'))
+                    raise
+
+                session['user_id'] = user_id
+                session['user_name'] = name or email
+                session.permanent = True
+                logger.info("Google OAuth registration and login successful for email: %s", email)
+                flash("Account created and login successful!", "success")
+                return redirect(url_for('dashboard'))
+        except sqlite3.Error as db_error:
+            logger.exception("Database error during Google OAuth callback: %s", db_error)
+            flash("Database error. Please try again later.", "error")
+            return redirect(url_for('login'))
     except Exception as e:
-        logger.exception("OAuth error during Google callback: %s", e)
+        logger.exception("Unexpected error during Google OAuth callback: %s", e)
         flash("OAuth login failed. Please try again.", "error")
         return redirect(url_for('login'))
 
@@ -932,41 +956,63 @@ def login():
         return redirect(url_for("dashboard"))
 
     if request.method == "POST":
-        email = request.form.get("email")
-        password = request.form.get("password")
+        try:
+            email = request.form.get("email", "").strip()
+            password = request.form.get("password", "").strip()
 
-        if not email or not password:
-            flash("Please enter both email and password.", "error")
+            if not email or not password:
+                flash("Please enter both email and password.", "error")
+                return redirect(url_for("login"))
+
+            try:
+                with get_db() as conn:
+                    user = conn.execute("SELECT * FROM users WHERE email = ?", (email,)).fetchone()
+            except sqlite3.Error as db_error:
+                logger.exception("Database error during login: %s", db_error)
+                flash("Database error. Please try again later.", "error")
+                return redirect(url_for("login"))
+
+            if not user:
+                flash("User not found. Please register first.", "error")
+                return redirect(url_for("login"))
+
+            if user['password'] is None:
+                flash("Account created via OAuth. Please login with Google.", "error")
+                return redirect(url_for("login"))
+
+            if not check_password_hash(user['password'], password):
+                flash("Invalid password.", "error")
+                return redirect(url_for("login"))
+
+            if user['verified'] != 1:
+                flash("Please verify your email first.", "error")
+                return redirect(url_for("login"))
+
+            session['user_id'] = user['id']
+            session['user_name'] = user['fullname'] or user['name'] or user['email']
+            session.permanent = True
+            
+            remember = request.form.get("remember")
+            if remember:
+                try:
+                    token = secrets.token_urlsafe(32)
+                    expiry = time.time() + (30 * 24 * 60 * 60)
+                    with get_db() as conn:
+                        conn.execute("INSERT INTO remember_tokens (user_id, token, expiry) VALUES (?, ?, ?)", 
+                                   (user['id'], token, expiry))
+                    session['remember_token'] = token
+                except sqlite3.Error as db_error:
+                    logger.exception("Error creating remember token: %s", db_error)
+            
+            flash("Login successful!", "success")
+            return redirect(url_for("predict"))
+        
+        except Exception as e:
+            logger.exception("Unexpected error during login: %s", e)
+            flash("An unexpected error occurred. Please try again later.", "error")
             return redirect(url_for("login"))
-
-        with get_db() as conn:
-            user = conn.execute("SELECT * FROM users WHERE email = ?", (email,)).fetchone()
-
-        if not user:
-            flash("User not found.", "error")
-            return redirect(url_for("login"))
-
-        if not check_password_hash(user['password'], password):
-            flash("Invalid password.", "error")
-            return redirect(url_for("login"))
-
-        if user['verified'] != 1:
-            flash("Please verify OTP first.", "error")
-            return redirect(url_for("login"))
-
-        session['user_id'] = user['id']
-        session['user_name'] = user['fullname']
-        remember = request.form.get("remember")
-        if remember:
-            # Generate remember token
-            token = secrets.token_urlsafe(32)
-            expiry = time.time() + (30 * 24 * 60 * 60)  # 30 days
-            with get_db() as conn:
-                conn.execute("INSERT INTO remember_tokens (user_id, token, expiry) VALUES (?, ?, ?)", 
-                           (user['id'], token, expiry))
-            session['remember_token'] = token
-        flash("Login successful!", "success")
-        return redirect(url_for("predict"))
+    
+    return render_template("login.html")
 
     return render_template("login.html")
 
