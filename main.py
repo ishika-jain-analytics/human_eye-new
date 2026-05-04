@@ -319,15 +319,40 @@ def allow_contact_submission(ip):
     return True
 
 def verify_recaptcha(token):
-    secret = app.config.get("RECAPTCHA_SECRET_KEY")
-    if not secret:
-        return True
-    payload = urllib.parse.urlencode({"secret": secret, "response": token}).encode()
     try:
-        with urllib.request.urlopen("https://www.google.com/recaptcha/api/siteverify", data=payload, timeout=5) as response:
-            result = json.loads(response.read().decode())
-        return result.get("success", False)
-    except Exception:
+        secret = app.config.get("RECAPTCHA_SECRET_KEY")
+        if not secret or not token or not isinstance(token, str):
+            logger.warning('reCAPTCHA verification skipped: missing secret or token')
+            return False
+        
+        token = token.strip()
+        if not token:
+            logger.warning('reCAPTCHA token is empty after stripping')
+            return False
+        
+        payload = {'secret': secret, 'response': token}
+        response = requests.post(
+            'https://www.google.com/recaptcha/api/siteverify',
+            data=payload,
+            timeout=5
+        )
+        response.raise_for_status()
+        result = response.json()
+        success = result.get('success', False)
+        score = result.get('score', 0)
+        
+        if not success:
+            logger.warning('reCAPTCHA verification failed: success=False, error_codes=%s', result.get('error-codes', []))
+        
+        return success and score > 0.5
+    except requests.exceptions.Timeout:
+        logger.error('reCAPTCHA verification timeout')
+        return False
+    except requests.exceptions.RequestException as e:
+        logger.error('reCAPTCHA API request failed: %s', e)
+        return False
+    except Exception as e:
+        logger.exception('Unexpected error during reCAPTCHA verification: %s', e)
         return False
 
 @app.route("/")
@@ -389,93 +414,106 @@ def contact():
 @app.route("/register", methods=["GET", "POST"])
 def register():
     if request.method == "POST":
-        fullname = request.form.get("fullname")
-        email = request.form.get("email")
-        password = request.form.get("password")
-        confirm_password = request.form.get("confirm_password")
-
-        if not all([fullname, email, password, confirm_password]):
-            flash("All fields are required.", "error")
-            return redirect(url_for("register"))
-
-        if password != confirm_password:
-            flash("Passwords do not match.", "error")
-            return redirect(url_for("register"))
-
-        if not is_valid_email(email):
-            flash("Please enter a valid email address.", "error")
-            return redirect(url_for("register"))
-
-        recaptcha_token = request.form.get("g-recaptcha-response")
-        if not recaptcha_token or not verify_recaptcha(recaptcha_token):
-            flash("Please complete the reCAPTCHA verification.", "error")
-            return redirect(url_for("register"))
-
-        # Check if email already exists
-        with get_db() as conn:
-            existing_user = conn.execute("SELECT id FROM users WHERE email = ?", (email,)).fetchone()
-        if existing_user:
-            flash("Email already registered. Please login instead.", "error")
-            return redirect(url_for("login"))
-
-        # Generate OTP
-        otp = ''.join(random.choices('0123456789', k=6))
-
-        # Send OTP email
         try:
-            logger.debug("Preparing OTP email for %s", email)
-            msg = Message(
-                subject='Email Verification - Eye Disease Prediction System',
-                sender=app.config.get('MAIL_DEFAULT_SENDER'),
-                recipients=[email]
-            )
-
-            msg.html = build_email_html(
-                title='Email Verification',
-                intro='Thank you for using Eye Disease Prediction System. Please use the OTP below to verify your email address.',
-                code_label='OTP Code',
-                code_value=otp,
-                expiry_text='This OTP is valid for 10 minutes.',
-                support_email=Config.SUPPORT_EMAIL
-            )
-            msg.body = build_email_body(
-                title='Email Verification',
-                intro='Thank you for using Eye Disease Prediction System. Please use the OTP below to verify your email address.',
-                code_label='OTP Code',
-                code_value=otp,
-                expiry_text='This OTP is valid for 10 minutes.',
-                support_email=Config.SUPPORT_EMAIL
-            )
-
-            logger.debug("Sending OTP email to %s", email)
-            mail.send(msg)
-            logger.info("OTP email sent successfully to %s", email)
-
-        except SMTPException as e:
-            logger.exception("SMTP error while sending OTP to %s: %s", email, e)
-            flash("Failed to send OTP email due to mail server authentication or connection issue. Please verify your SMTP credentials and network.", "error")
-            return redirect(url_for("register"))
+            fullname = request.form.get("fullname", "").strip()
+            email = request.form.get("email", "").strip()
+            password = request.form.get("password", "").strip()
+            confirm_password = request.form.get("confirm_password", "").strip()
+            recaptcha_token = request.form.get("g-recaptcha-response", "").strip()
+            
+            if not all([fullname, email, password, confirm_password]):
+                flash("All fields are required.", "error")
+                return redirect(url_for("register"))
+            
+            if len(password) < 6:
+                flash("Password must be at least 6 characters.", "error")
+                return redirect(url_for("register"))
+            
+            if password != confirm_password:
+                flash("Passwords do not match.", "error")
+                return redirect(url_for("register"))
+            
+            if not is_valid_email(email):
+                flash("Please enter a valid email address.", "error")
+                return redirect(url_for("register"))
+            
+            if not recaptcha_token:
+                flash("Please complete the reCAPTCHA verification.", "error")
+                return redirect(url_for("register"))
+            
+            if not verify_recaptcha(recaptcha_token):
+                logger.warning('reCAPTCHA verification failed for email: %s', email)
+                flash("reCAPTCHA verification failed. Please try again.", "error")
+                return redirect(url_for("register"))
+            
+            try:
+                with get_db() as conn:
+                    existing_user = conn.execute("SELECT id FROM users WHERE email = ?", (email,)).fetchone()
+                    if existing_user:
+                        flash("Email already registered. Please login instead.", "error")
+                        return redirect(url_for("login"))
+            except sqlite3.Error as db_error:
+                logger.exception('Database error checking existing user: %s', db_error)
+                flash("Database error. Please try again later.", "error")
+                return redirect(url_for("register"))
+            
+            otp = ''.join(random.choices('0123456789', k=6))
+            
+            try:
+                logger.debug("Preparing OTP email for %s", email)
+                msg = Message(
+                    subject='Email Verification - Eye Disease Prediction System',
+                    sender=app.config.get('MAIL_DEFAULT_SENDER'),
+                    recipients=[email]
+                )
+                msg.html = build_email_html(
+                    title='Email Verification',
+                    intro='Thank you for using Eye Disease Prediction System. Please use the OTP below to verify your email address.',
+                    code_label='OTP Code',
+                    code_value=otp,
+                    expiry_text='This OTP is valid for 10 minutes.',
+                    support_email=Config.SUPPORT_EMAIL
+                )
+                msg.body = build_email_body(
+                    title='Email Verification',
+                    intro='Thank you for using Eye Disease Prediction System. Please use the OTP below to verify your email address.',
+                    code_label='OTP Code',
+                    code_value=otp,
+                    expiry_text='This OTP is valid for 10 minutes.',
+                    support_email=Config.SUPPORT_EMAIL
+                )
+                logger.debug("Sending OTP email to %s", email)
+                mail.send(msg)
+                logger.info("OTP email sent successfully to %s", email)
+            except SMTPException as e:
+                logger.exception("SMTP error while sending OTP to %s: %s", email, e)
+                flash("Failed to send OTP email due to mail server issue. Please try again later.", "error")
+                return redirect(url_for("register"))
+            except Exception as e:
+                logger.exception("Unexpected error while sending OTP to %s: %s", email, e)
+                flash("Failed to send OTP email. Please try again later.", "error")
+                return redirect(url_for("register"))
+            
+            hashed_password = generate_password_hash(password)
+            session['otp'] = otp
+            session['otp_email'] = email
+            session['otp_time'] = time.time()
+            session['last_resend_time'] = time.time()
+            session['resend_count'] = 0
+            session['user_data'] = {
+                'fullname': fullname,
+                'email': email,
+                'password': hashed_password
+            }
+            
+            flash("OTP sent to your email. Please verify.", "success")
+            return redirect(url_for("verify_otp"))
+        
         except Exception as e:
-            logger.exception("Unexpected error while sending OTP to %s: %s", email, e)
-            flash("Failed to send OTP email. Please try again later.", "error")
+            logger.exception("Unexpected error during registration: %s", e)
+            flash("An unexpected error occurred during registration. Please try again later.", "error")
             return redirect(url_for("register"))
-
-        # Store in session
-        hashed_password = generate_password_hash(password)
-        session['otp'] = otp
-        session['otp_email'] = email
-        session['otp_time'] = time.time()
-        session['last_resend_time'] = time.time()  # Initialize resend tracking
-        session['resend_count'] = 0  # Initialize resend count
-        session['user_data'] = {
-            'fullname': fullname,
-            'email': email,
-            'password': hashed_password
-        }
-
-        flash("OTP sent to your email. Please verify.", "success")
-        return redirect(url_for("verify_otp"))
-
+    
     return render_template("register.html", recaptcha_site_key=app.config.get("RECAPTCHA_SITE_KEY"))
 
 @app.route("/verify-otp", methods=["GET", "POST"])
