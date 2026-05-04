@@ -74,7 +74,7 @@ google = oauth.register(
     client_kwargs={'scope': 'openid email profile'}
 )
 
-app.config['DATABASE'] = Config.DATABASE_URL.replace('sqlite:///', os.path.join(app.root_path, '')) if Config.DATABASE_URL.startswith('sqlite:///') else Config.DATABASE_URL
+app.config['DATABASE'] = os.path.join(BASE_DIR, 'users.db')
 
 def get_db():
     conn = sqlite3.connect(app.config['DATABASE'])
@@ -82,42 +82,50 @@ def get_db():
     return conn
 
 def init_db():
-    os.makedirs(os.path.dirname(app.config['DATABASE']), exist_ok=True)
-    with get_db() as conn:
-        conn.execute('''CREATE TABLE IF NOT EXISTS users (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            name TEXT,
-            email TEXT UNIQUE,
-            password TEXT,
-            google_id TEXT
-        )''')
-        cols = [row['name'] for row in conn.execute("PRAGMA table_info(users)").fetchall()]
-        if 'google_id' not in cols:
-            conn.execute("ALTER TABLE users ADD COLUMN google_id TEXT")
-        if 'verified' not in cols:
-            conn.execute("ALTER TABLE users ADD COLUMN verified INTEGER DEFAULT 0")
-        if 'fullname' not in cols:
-            conn.execute("ALTER TABLE users ADD COLUMN fullname TEXT")  # Keep for compatibility
+    try:
+        os.makedirs(os.path.dirname(app.config['DATABASE']), exist_ok=True)
+        with get_db() as conn:
+            conn.execute('''CREATE TABLE IF NOT EXISTS users (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT,
+                email TEXT UNIQUE,
+                password TEXT,
+                google_id TEXT
+            )''')
+            cols = [row['name'] for row in conn.execute("PRAGMA table_info(users)").fetchall()]
+            if 'google_id' not in cols:
+                conn.execute("ALTER TABLE users ADD COLUMN google_id TEXT")
+            if 'verified' not in cols:
+                conn.execute("ALTER TABLE users ADD COLUMN verified INTEGER DEFAULT 0")
+            if 'fullname' not in cols:
+                conn.execute("ALTER TABLE users ADD COLUMN fullname TEXT")
 
-        conn.execute('''CREATE TABLE IF NOT EXISTS remember_tokens (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            user_id INTEGER NOT NULL,
-            token TEXT UNIQUE NOT NULL,
-            expiry REAL NOT NULL,
-            FOREIGN KEY (user_id) REFERENCES users (id)
-        )''')
-        
-        conn.execute('''CREATE TABLE IF NOT EXISTS predictions (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            user_id INTEGER NOT NULL,
-            image_path TEXT NOT NULL,
-            disease TEXT NOT NULL,
-            confidence REAL NOT NULL,
-            severity TEXT NOT NULL,
-            date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            FOREIGN KEY (user_id) REFERENCES users (id)
-        )''')
-        conn.commit()
+            conn.execute('''CREATE TABLE IF NOT EXISTS remember_tokens (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
+                token TEXT UNIQUE NOT NULL,
+                expiry REAL NOT NULL,
+                FOREIGN KEY (user_id) REFERENCES users (id)
+            )''')
+            conn.execute('''CREATE TABLE IF NOT EXISTS predictions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
+                image_path TEXT NOT NULL,
+                disease TEXT NOT NULL,
+                confidence REAL NOT NULL,
+                severity TEXT NOT NULL,
+                date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (user_id) REFERENCES users (id)
+            )''')
+            conn.commit()
+        logger.info('Database initialized at %s', app.config['DATABASE'])
+    except sqlite3.Error as db_error:
+        logger.exception('Database initialization failed: %s', db_error)
+        raise
+
+@app.before_first_request
+def ensure_database():
+    init_db()
 
 EMAIL_REGEX = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 
@@ -841,7 +849,7 @@ def google_callback():
         token = google.authorize_access_token()
         userinfo = google.get('https://www.googleapis.com/oauth2/v2/userinfo').json()
         email = userinfo.get('email')
-        name = userinfo.get('name')
+        name = userinfo.get('name') or ''
         google_id = userinfo.get('id')
 
         if not email:
@@ -849,21 +857,36 @@ def google_callback():
             return redirect(url_for('login'))
 
         with get_db() as conn:
-            user = conn.execute("SELECT * FROM users WHERE email = ? OR google_id = ?", (email, google_id)).fetchone()
+            user = conn.execute("SELECT * FROM users WHERE email = ?", (email,)).fetchone()
             if user:
+                if google_id and not user['google_id']:
+                    conn.execute("UPDATE users SET google_id = ? WHERE id = ?", (google_id, user['id']))
                 session['user_id'] = user['id']
-                session['user_name'] = user['name'] or user['fullname']
+                session['user_name'] = user['name'] or (user['fullname'] if 'fullname' in user.keys() else email)
                 flash("Login successful!", "success")
                 return redirect(url_for('dashboard'))
-            else:
-                conn.execute("INSERT INTO users (name, email, google_id) VALUES (?, ?, ?)", (name, email, google_id))
+
+            try:
+                conn.execute(
+                    "INSERT INTO users (name, email, password, google_id) VALUES (?, ?, NULL, ?)",
+                    (name, email, google_id)
+                )
                 user_id = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
-                session['user_id'] = user_id
-                session['user_name'] = name
-                flash("Account created and login successful!", "success")
-                return redirect(url_for('dashboard'))
+            except sqlite3.IntegrityError:
+                existing_user = conn.execute("SELECT * FROM users WHERE email = ?", (email,)).fetchone()
+                if existing_user:
+                    session['user_id'] = existing_user['id']
+                    session['user_name'] = existing_user['name'] or (existing_user['fullname'] if 'fullname' in existing_user.keys() else email)
+                    flash("Login successful!", "success")
+                    return redirect(url_for('dashboard'))
+                raise
+
+            session['user_id'] = user_id
+            session['user_name'] = name or email
+            flash("Account created and login successful!", "success")
+            return redirect(url_for('dashboard'))
     except Exception as e:
-        logger.error(f"OAuth error: {e}")
+        logger.exception("OAuth error during Google callback: %s", e)
         flash("OAuth login failed. Please try again.", "error")
         return redirect(url_for('login'))
 
