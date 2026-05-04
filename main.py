@@ -123,9 +123,7 @@ def init_db():
         logger.exception('Database initialization failed: %s', db_error)
         raise
 
-@app.before_first_request
-def ensure_database():
-    init_db()
+init_db()
 
 EMAIL_REGEX = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 
@@ -1255,8 +1253,6 @@ def logout():
     return redirect(url_for("home"))
 
 if __name__ == "__main__":
-    with app.app_context():
-        init_db()
     import os
     port = int(os.environ.get("PORT", 10000))
     app.run(host="0.0.0.0", port=port)
