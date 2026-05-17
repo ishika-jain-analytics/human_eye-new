@@ -34,6 +34,7 @@ from reportlab.lib import colors
 from reportlab.lib.units import inch
 from config import Config
 
+ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg'}
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
 MODEL_PATH = os.path.join(
@@ -50,7 +51,7 @@ app.config.setdefault('SESSION_COOKIE_SAMESITE', 'Lax')
 app.config.setdefault('SESSION_COOKIE_SECURE', os.getenv('SESSION_COOKIE_SECURE', 'False').lower() == 'true')
 app.config.setdefault('SESSION_REFRESH_EACH_REQUEST', True)
 
-print("✅ Model loaded successfully")
+print(" Model loaded successfully")
 app.secret_key = Config.SECRET_KEY
 app.permanent_session_lifetime = timedelta(days=7)
 
